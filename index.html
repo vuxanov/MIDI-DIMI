@@ -124,6 +124,14 @@ const tau = Math.PI * 2;
 const hz = note => 440 * 2 ** ((note - 69) / 12);
 const cutoffFloors = [42, 480, 1600, 320, 62, 240, 340, 560];
 const cutoffKnee = .08;
+const drumBodyLevels = [.50, .34, .31, .37];
+const voiceLevels = [1.24, .94, 1.10, .92, .62, .48, .33, .56];
+const synthWaveforms = [
+  ['sawtooth', 'triangle', 'square'],
+  ['triangle', 'sawtooth', 'sine'],
+  ['triangle', 'sawtooth', 'sine']
+];
+const waveformLevel = { triangle: 1, sawtooth: 1, square: .58, sine: .82 };
 function cutoff(value, index) {
   const floor = cutoffFloors[index];
   if (value <= cutoffKnee) return 12 * (floor / 12) ** (value / cutoffKnee);
@@ -141,8 +149,13 @@ class Audio {
     this.ctx = new AudioContext({ latencyHint: 'interactive' });
     const ctx = this.ctx;
     const master = ctx.createGain();
-    master.gain.value = .7;
+    master.gain.value = 1;
     const compressor = ctx.createDynamicsCompressor();
+    compressor.threshold.value = -12;
+    compressor.knee.value = 10;
+    compressor.ratio.value = 10;
+    compressor.attack.value = .003;
+    compressor.release.value = .12;
     master.connect(compressor).connect(ctx.destination);
     this.master = master;
     this.reverbImpulse = this.buffer(4.6, (t, d) =>
@@ -255,7 +268,21 @@ class Audio {
         const f = 170 + variant * 63;
         return .65 * Math.sin(tau * f * t + 2.2 * Math.sin(tau * f * 2.41 * t)) * Math.exp(-t * (8 + variant * 2));
       })
-    ];
+    ].map((buffer, index) => {
+      const samples = buffer.getChannelData(0);
+      const window = Math.min(samples.length, Math.round(this.ctx.sampleRate * .12));
+      let peak = 0;
+      let energy = 0;
+      for (let i = 0; i < samples.length; i++) {
+        peak = Math.max(peak, Math.abs(samples[i]));
+        if (i < window) energy += samples[i] ** 2;
+      }
+      if (!peak || !energy) return buffer;
+      const rms = Math.sqrt(energy / window);
+      const gain = Math.min(.98 / peak, drumBodyLevels[index] / rms);
+      for (let i = 0; i < samples.length; i++) samples[i] *= gain;
+      return buffer;
+    });
   }
 
   update(index, track, tempo) {
@@ -299,7 +326,7 @@ class Audio {
     const sources = [];
     const drum = index < 4;
     const texture = index === 7;
-    const peak = (drum ? [.88, .75, .94, .56][index] : [.48, .29, .19, .43][index - 4]) * velocity / Math.sqrt(notes.length);
+    const peak = voiceLevels[index] * velocity / Math.sqrt(notes.length);
     const attack = attackTime(track.attack, index);
     const hold = drum ? holdTime(track.sustain) : 0;
     const release = releaseTime(track.release, index);
@@ -339,14 +366,18 @@ class Audio {
       }
     }
     if (!drum && !texture) {
+      const waveform = synthWaveforms[index - 4][track.patch];
+      const detunes = index >= 5 ? [-7, 7] : [0];
+      const layers = ctx.createGain();
+      layers.gain.value = waveformLevel[waveform] / Math.sqrt(detunes.length);
+      layers.connect(amp);
       for (const note of notes) {
-        for (const cents of index >= 5 ? [-7, 7] : [0]) {
+        for (const cents of detunes) {
           const osc = ctx.createOscillator();
-          osc.type = [['sawtooth', 'triangle', 'square'], ['triangle', 'sawtooth', 'sine'],
-            ['triangle', 'sawtooth', 'sine']][index - 4][track.patch];
+          osc.type = waveform;
           osc.frequency.value = hz(note);
           osc.detune.value = cents;
-          osc.connect(amp);
+          osc.connect(layers);
           sources.push(osc);
         }
       }
