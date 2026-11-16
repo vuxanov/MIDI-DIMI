@@ -48,9 +48,9 @@ label {display:inline-flex;align-items:center;gap:7px}
 .dial:focus-within {outline:2px dashed;outline-offset:2px}
 .knob {display:grid;gap:3px;font-size:11px;white-space:nowrap}
 .fader {writing-mode:vertical-lr;direction:rtl;width:24px;height:60px;accent-color:#000}
-#keyboard {display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:3px}
-#keyboard[hidden],#steps[hidden] {display:none}
-.piano-key {display:flex;align-items:flex-end;justify-content:center;min-height:124px;min-width:0;padding:8px 0;touch-action:none}
+#keyboard {display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:3px;margin-bottom:8px}
+#keyboard[hidden] {display:none}
+.piano-key {display:flex;align-items:center;justify-content:center;min-height:38px;min-width:0;padding:8px 0;touch-action:none}
 #octave {font-size:12px;white-space:nowrap}
 .pattern-toolbar {display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .pattern-toolbar h2 {margin-right:auto}
@@ -110,7 +110,8 @@ details p {max-width:78ch}
 <div class="group"><button id="previousSteps" aria-label="Previous eight steps">←</button><button id="nextSteps" aria-label="Next eight steps">→</button></div>
 <button id="keys" aria-pressed="false" title="Switch bottom buttons between steps and live notes">Keys</button>
 </div>
-<div class="scroll"><div id="steps"></div><div id="keyboard" aria-label="Playable keys" hidden></div></div>
+<div id="keyboard" aria-label="Playable keys" hidden></div>
+<div class="scroll"><div id="steps"></div></div>
 <div id="editor"></div>
 </section>
 <details id="setup"><summary>MIDI mapping &amp; shortcuts</summary>
@@ -1265,10 +1266,7 @@ function moveStepBank(delta) {
 function renderSteps() {
   const track = state.tracks[selected];
   const octave = octaveOf(selected);
-  $('steps').hidden = keys;
   $('keyboard').hidden = !keys;
-  $('length').hidden = keys;
-  $('editor').hidden = keys;
   $('octave').hidden = !keys;
   $('octave').textContent = 'Oct ' + (octave > 0 ? '+' : '') + octave;
   for (const [id, delta] of [['previousSteps', -1], ['nextSteps', 1]]) {
@@ -1278,7 +1276,6 @@ function renderSteps() {
     arrow.setAttribute('aria-label', keys ? (delta < 0 ? 'Octave down' : 'Octave up')
       : (delta < 0 ? 'Previous eight steps' : 'Next eight steps'));
   }
-  if (keys) return;
   stepButtons = track.steps.slice(0, track.length * 16).map((step, index) => {
     const selectNote = () => {
       chosen = index;
