@@ -1,0 +1,1394 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MIDI DIMI</title>
+<meta name="description" content="An eight-track techno and ambient groovebox for the Launch Control XL.">
+<style>
+:root { color-scheme: light; font: 14px ui-monospace,monospace; color:#000; background:#fff; }
+* {box-sizing:border-box}
+body {margin:0}
+main {max-width:1240px;margin:auto;padding:24px clamp(12px,4vw,48px)}
+header,.section-head,.transport,.mode,.setup-controls,#editor {display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+header,.section-head {justify-content:space-between}
+header {padding:0 0 12px;border-bottom:2px solid}
+h1 {font-size:clamp(32px,6vw,64px);letter-spacing:-.085em;line-height:1;margin:0;font-weight:700}
+h2 {font-size:16px;letter-spacing:-.04em;margin:0}
+section {margin-top:16px}
+.section-head {margin-bottom:8px}
+button,input,select {font:inherit;color:inherit;background:#fff}
+button,select,input[type=number] {min-height:30px;border:1px solid #000;padding:3px 8px;border-radius:0}
+select {
+  appearance:none;
+  padding-right:27px;
+  background-image:linear-gradient(45deg,transparent 48%,#000 50%),linear-gradient(135deg,#000 50%,transparent 52%);
+  background-position:right 13px center,right 8px center;
+  background-size:5px 5px;
+  background-repeat:no-repeat;
+}
+button,select,summary {cursor:pointer}
+button:hover {outline:1px solid;outline-offset:-3px}
+:focus-visible {outline:2px dashed #000;outline-offset:3px}
+button.primary,button[aria-pressed=true] {background:#000;color:#fff}
+button.primary:hover,button[aria-pressed=true]:hover {outline-color:#fff}
+input[type=number] {width:74px}
+label {display:inline-flex;align-items:center;gap:7px}
+.group {display:flex}
+.group button+button {border-left:0}
+.scroll {overflow:auto;padding:3px;margin:-3px}
+#mixer {display:grid;grid-template-columns:repeat(8,minmax(95px,1fr));min-width:760px;border:1px solid}
+.channel {display:grid;justify-items:center;gap:6px;padding:6px;text-align:center}
+.channel+.channel {border-left:1px solid}
+.track {width:100%;white-space:nowrap;padding-inline:2px;font-weight:600}
+.dial {position:relative;width:28px;height:28px;border:1px solid #000;border-radius:50%;display:block;margin:auto}
+.dial::after {content:"";position:absolute;left:12px;top:3px;width:2px;height:8px;background:#000;transform:rotate(var(--angle));transform-origin:50% 10px;pointer-events:none}
+.dial input {position:absolute;inset:0;width:100%;height:100%;margin:0;opacity:0;cursor:ew-resize}
+.dial:focus-within {outline:2px dashed;outline-offset:2px}
+.knob {display:grid;gap:3px;font-size:11px;white-space:nowrap}
+.fader {writing-mode:vertical-lr;direction:rtl;width:24px;height:60px;accent-color:#000}
+#keyboard {display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:3px}
+#keyboard[hidden],#steps[hidden] {display:none}
+.piano-key {display:flex;align-items:flex-end;justify-content:center;min-height:124px;min-width:0;padding:8px 0;touch-action:none}
+#octave {font-size:12px;white-space:nowrap}
+.pattern-toolbar {display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.pattern-toolbar h2 {margin-right:auto}
+#soundField {display:inline-flex}
+.dial:has(input.touched),.dial:has(input:active) {background:#000}
+.dial:has(input.touched)::after,.dial:has(input:active)::after {background:#fff}
+.fader.touched,.fader:active {outline:1px solid #000;outline-offset:2px}
+button:active {background:#000;color:#fff}
+#steps {display:grid;gap:10px}
+.pattern-bar {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-items:center;gap:8px}
+.step-bank {display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:3px}
+.step-bank.current {outline:1px dashed #000;outline-offset:2px}
+@media (max-width:540px) {
+  .pattern-bar {gap:5px}
+  .step-bank {gap:2px}
+  .step-bank .step {font-size:9px;overflow:hidden}
+}
+.step {min-height:31px;padding:0;font-size:12px}
+.step[aria-pressed=true] {background:#000;color:#fff}
+.step-mark {display:inline-block;width:10px;height:10px;border:1px solid;border-radius:50%}
+.step[aria-pressed=true] .step-mark {background:#fff}
+.step:nth-child(4n+1) {border-left-width:3px}
+.step.cursor {outline:2px solid;outline-offset:1px}
+.step.chosen {box-shadow:inset 0 0 0 2px #fff}
+#editor:not(:empty) {margin-top:8px}
+details {margin-top:14px;padding:8px 0;border-top:1px solid;font-size:12px}
+details p {max-width:78ch}
+</style>
+</head>
+<body>
+<main>
+<header><h1>MIDI DIMI</h1><button id="midi">Connect MIDI</button></header>
+<section class="transport" aria-label="Transport">
+<button id="play" class="primary">▶ Play</button><button id="record" aria-pressed="false">● Record</button>
+<label>BPM <input id="tempo" type="number" min="40" max="220" value="128"></label>
+<label>Presets <select id="preset"><option value="blank">Blank</option><option value="techno">Techno</option><option value="hypnotic">Hypnotic</option><option value="ambient">Ambient</option></select></label>
+<button id="resetSession" type="button" title="Reset to a blank session">Reset</button>
+</section>
+<p id="status" role="status" hidden></p>
+<p id="playbackStatus" role="status" hidden></p>
+<section aria-label="Mixer">
+<div class="section-head"><h2>Mixer</h2><div id="pages" class="group" aria-label="Control page"><button data-page="0">Mix</button><button data-page="1">Sound</button><button data-page="2">Mod</button><button data-page="3" title="Envelope">Env</button></div></div>
+<div class="scroll"><div id="mixer"></div></div>
+</section>
+<section aria-label="Pattern">
+<div class="section-head pattern-toolbar">
+<h2 id="patternTitle">Pattern</h2>
+<div id="soundField"></div>
+<select id="length" aria-label="Pattern length"><option value="1">1 bar</option><option value="2">2 bars</option><option value="4">4 bars</option></select>
+<output id="octave" aria-live="polite" hidden></output>
+<div class="group"><button id="previousSteps" aria-label="Previous eight steps">←</button><button id="nextSteps" aria-label="Next eight steps">→</button></div>
+<button id="keys" aria-pressed="false" title="Switch bottom buttons between steps and live notes">Keys</button>
+</div>
+<div class="scroll"><div id="steps"></div><div id="keyboard" aria-label="Playable keys" hidden></div></div>
+<div id="editor"></div>
+</section>
+<details id="setup"><summary>MIDI mapping &amp; shortcuts</summary>
+<p>MK1/MK2: select Factory template 1. XL 3: use the DAW input. Connect MIDI activates its DAW mode. If you use a custom mode, MIDI Learn can pick up the MIDI messages it sends. In Keys mode, configure custom buttons to send momentary messages.</p>
+<p id="midiActivity">No MIDI messages received.</p>
+<div class="setup-controls"><button id="testLED" type="button" disabled>Test lights</button><label>Input <select id="port"></select></label><label>Profile <select id="profile"><option value="legacy">XL MK1 / MK2</option><option value="xl3">XL 3</option></select></label><label>Control <select id="learnTarget"></select></label><button id="learn">Learn</button><button id="resetMap">Reset learned</button></div>
+<p>Upper MIDI buttons select tracks. Lower buttons edit eight steps or play notes in Keys mode. Track arrows move through the pattern eight steps at a time or shift the octave in Keys mode. Space plays or stops. A S D F G H J K mirror the lower row. Your session and learned controls save in this browser.</p></details>
+</main>
+<script type="module">
+const tau = Math.PI * 2;
+const hz = note => 440 * 2 ** ((note - 69) / 12);
+const cutoffFloors = [42, 480, 1600, 320, 62, 240, 340, 560];
+const cutoffKnee = .08;
+function cutoff(value, index) {
+  const floor = cutoffFloors[index];
+  if (value <= cutoffKnee) return 12 * (floor / 12) ** (value / cutoffKnee);
+  const sweep = (value - cutoffKnee) / (1 - cutoffKnee);
+  return floor * (18000 / floor) ** (sweep ** 1.15);
+}
+const attackTime = (value, index) => .003 + value ** 2 * (index < 4 ? .17 : index === 7 ? .55 : 1.4);
+const holdTime = value => .22 * value ** 2;
+const releaseTime = (value, index) => .025 + value ** 2 * (index < 4 ? .65 : index >= 6 ? 5 : 2.7);
+const lfoRate = (value, tempo) => tempo / 240 * 2 ** (value * 8 - 3);
+const clamp = (value, minimum, maximum) => Math.min(maximum, Math.max(minimum, value));
+
+class Audio {
+  constructor(settings) {
+    this.ctx = new AudioContext({ latencyHint: 'interactive' });
+    const ctx = this.ctx;
+    const master = ctx.createGain();
+    master.gain.value = .7;
+    const compressor = ctx.createDynamicsCompressor();
+    master.connect(compressor).connect(ctx.destination);
+    this.master = master;
+    this.reverbImpulse = this.buffer(4.6, (t, d) =>
+      (Math.random() * 2 - 1) * (1 - t / d) ** 2.9 * Math.min(1, t / .018), 2);
+    this.kits = [0, 1, 2].map(variant => this.drums(variant));
+    this.noise = this.buffer(1.9, () => Math.random() * 2 - 1);
+    this.voices = new Set();
+    this.channels = settings.map((_, index) => {
+      const input = ctx.createGain();
+      const filter = ctx.createBiquadFilter();
+      const filterSlope = ctx.createBiquadFilter();
+      const shaper = ctx.createWaveShaper();
+      const volume = ctx.createGain();
+      const dry = ctx.createGain();
+      const echo = ctx.createGain();
+      const space = ctx.createGain();
+      const chorus = ctx.createDelay(.05);
+      const chorusMix = ctx.createGain();
+      const chorusOsc = ctx.createOscillator();
+      const chorusDepth = ctx.createGain();
+      chorus.delayTime.value = .018;
+      chorusOsc.frequency.value = .24 + index * .025;
+      chorusDepth.gain.value = .004;
+      chorusOsc.connect(chorusDepth).connect(chorus.delayTime);
+      chorusOsc.start();
+      input.connect(filter).connect(filterSlope).connect(shaper).connect(volume);
+      volume.connect(dry).connect(master);
+      shaper.connect(chorus).connect(chorusMix).connect(volume);
+      volume.connect(echo);
+      volume.connect(space);
+      const lfo = ctx.createOscillator();
+      const depth = ctx.createGain();
+      lfo.connect(depth);
+      depth.connect(filter.detune);
+      depth.connect(filterSlope.detune);
+      lfo.start();
+      return { input, filter, filterSlope, shaper, volume, dry, echo, space, chorusMix, lfo, depth };
+    });
+    this.resetEffects();
+  }
+
+  resetEffects() {
+    const ctx = this.ctx;
+    const master = this.master;
+    this.effects?.nodes.forEach(node => node.disconnect());
+    for (const channel of this.channels) {
+      if (this.effects) {
+        channel.echo.disconnect();
+        channel.space.disconnect();
+      }
+      for (const send of [channel.echo, channel.space, channel.chorusMix]) {
+        send.gain.cancelScheduledValues(ctx.currentTime);
+        send.gain.setValueAtTime(0, ctx.currentTime);
+      }
+    }
+    const delay = ctx.createDelay(3);
+    const feedback = ctx.createGain();
+    const echoFilter = ctx.createBiquadFilter();
+    echoFilter.frequency.value = 6200;
+    feedback.gain.value = .72;
+    delay.connect(echoFilter).connect(feedback).connect(delay);
+    const delayReturn = ctx.createGain();
+    delayReturn.gain.value = 1.3;
+    echoFilter.connect(delayReturn).connect(master);
+    const reverb = ctx.createConvolver();
+    reverb.buffer = this.reverbImpulse;
+    const reverbReturn = ctx.createGain();
+    reverbReturn.gain.value = 2.4;
+    reverb.connect(reverbReturn).connect(master);
+    this.effects = { delay, nodes: [delay, echoFilter, feedback, delayReturn, reverb, reverbReturn] };
+    this.tempo = undefined;
+    for (const channel of this.channels) {
+      channel.echo.connect(delay);
+      channel.space.connect(reverb);
+    }
+  }
+
+  buffer(seconds, sample, channels = 1) {
+    const rate = this.ctx.sampleRate;
+    const buffer = this.ctx.createBuffer(channels, Math.ceil(seconds * rate), rate);
+    for (let ch = 0; ch < channels; ch++) {
+      const data = buffer.getChannelData(ch);
+      for (let i = 0; i < data.length; i++) data[i] = sample(i / rate, seconds);
+    }
+    return buffer;
+  }
+
+  drums(variant) {
+    let previous = 0;
+    return [
+      this.buffer(.83, t => {
+        const fundamental = 45 + variant * 5;
+        const sweep = .034 + variant * .009;
+        const phase = tau * (fundamental * t + 135 * sweep * (1 - Math.exp(-t / sweep)));
+        return Math.tanh(1.4 * Math.sin(phase)) * Math.exp(-t * (5 + variant)) * Math.min(1, t * 900);
+      }),
+      this.buffer(.46, t => {
+        const noise = Math.random() * 2 - 1;
+        const high = noise - previous * .78;
+        previous = noise;
+        const bursts = [0, .011, .024].reduce((sum, start) =>
+          t >= start ? sum + Math.exp(-(t - start) * 135) : sum, 0);
+        return high * (.26 * bursts + .24 * Math.exp(-t * (11 + variant * 5)));
+      }),
+      this.buffer(.55, t => {
+        const metal = [3119, 4187, 5711, 6571, 7949].reduce((sum, f) => sum + Math.sign(Math.sin(tau * f * t)), 0);
+        return (.07 * metal + .25 * (Math.random() * 2 - 1)) * Math.exp(-t * (34 - variant * 10));
+      }),
+      this.buffer(.75, t => {
+        const f = 170 + variant * 63;
+        return .65 * Math.sin(tau * f * t + 2.2 * Math.sin(tau * f * 2.41 * t)) * Math.exp(-t * (8 + variant * 2));
+      })
+    ];
+  }
+
+  update(index, track, tempo) {
+    const channel = this.channels[index];
+    const now = this.ctx.currentTime;
+    const smooth = (parameter, value) => parameter.setTargetAtTime(value, now, .018);
+    if (this.tempo !== tempo) {
+      smooth(this.effects.delay.delayTime, 60 / tempo * .75);
+      this.tempo = tempo;
+    }
+    const frequency = cutoff(track.cutoff, index);
+    smooth(channel.filter.frequency, frequency);
+    smooth(channel.filterSlope.frequency, frequency);
+    smooth(channel.filter.Q, .25 + 16 * track.resonance + 2.5 * track.depth);
+    smooth(channel.volume.gain, track.mute ? 0 : track.volume ** 1.6);
+    const delayAmount = track.delay ** .75;
+    const reverbAmount = track.reverb ** .75;
+    const wetWeight = Math.max(1, Math.hypot(delayAmount, reverbAmount));
+    smooth(channel.dry.gain, 1 - .94 * Math.max(delayAmount, reverbAmount) ** 2);
+    smooth(channel.echo.gain, 1.35 * delayAmount / wetWeight);
+    smooth(channel.space.gain, 2 * reverbAmount / wetWeight);
+    smooth(channel.chorusMix.gain, index >= 5 ? track.character * .48 : 0);
+    if (index < 5 && channel.character !== track.character) {
+      const drive = track.character * 7;
+      channel.shaper.curve = drive < .01 ? null : Float32Array.from({ length: 1024 }, (_, i) =>
+        Math.tanh((i / 511.5 - 1) * (1 + drive)) / Math.tanh(1 + drive));
+      channel.character = track.character;
+    }
+    smooth(channel.lfo.frequency, lfoRate(track.rate, tempo));
+    smooth(channel.depth.gain, 4200 * track.depth);
+    smooth(channel.filter.detune, -1450 * track.depth);
+    smooth(channel.filterSlope.detune, -1450 * track.depth);
+  }
+
+  hit(index, track, notes, time, gate, velocity = 1) {
+    if (this.voices.size >= 120) return () => {};
+    const ctx = this.ctx;
+    const channel = this.channels[index];
+    const amp = ctx.createGain();
+    amp.connect(channel.input);
+    const sources = [];
+    const drum = index < 4;
+    const texture = index === 7;
+    const peak = (drum ? [.88, .75, .94, .56][index] : [.48, .29, .19, .43][index - 4]) * velocity / Math.sqrt(notes.length);
+    const attack = attackTime(track.attack, index);
+    const hold = drum ? holdTime(track.sustain) : 0;
+    const release = releaseTime(track.release, index);
+    const decay = .025 + track.decay ** 2 * (drum ? 1.15 : 2.4);
+    const sustain = Math.max(.00012, peak * (drum ? .035 : track.sustain));
+    amp.gain.setValueAtTime(.0001, time);
+    amp.gain.exponentialRampToValueAtTime(peak, time + attack);
+    if (hold) amp.gain.setValueAtTime(peak, time + attack + hold);
+    amp.gain.exponentialRampToValueAtTime(sustain, time + attack + hold + decay);
+    if (drum) {
+      for (const note of notes) {
+        const source = ctx.createBufferSource();
+        source.buffer = this.kits[track.patch][index];
+        source.playbackRate.value = 2 ** ((note - drumRoot) / 12);
+        source.connect(amp);
+        sources.push(source);
+      }
+    }
+    if (texture) {
+      const noise = ctx.createBufferSource();
+      noise.buffer = this.noise;
+      noise.loop = true;
+      noise.playbackRate.value = .65 + .25 * track.patch;
+      const grit = ctx.createGain();
+      grit.gain.value = [.52, .28, .76][track.patch];
+      noise.connect(grit).connect(amp);
+      sources.push(noise);
+      const toneLevel = ctx.createGain();
+      toneLevel.gain.value = [.52, .60, .40][track.patch];
+      toneLevel.connect(amp);
+      for (const note of notes) {
+        const tone = ctx.createOscillator();
+        tone.type = ['triangle', 'sine', 'sawtooth'][track.patch];
+        tone.frequency.value = hz(note + (track.patch === 1 ? 12 : 0));
+        tone.connect(toneLevel);
+        sources.push(tone);
+      }
+    }
+    if (!drum && !texture) {
+      for (const note of notes) {
+        for (const cents of index >= 5 ? [-7, 7] : [0]) {
+          const osc = ctx.createOscillator();
+          osc.type = [['sawtooth', 'triangle', 'square'], ['triangle', 'sawtooth', 'sine'],
+            ['triangle', 'sawtooth', 'sine']][index - 4][track.patch];
+          osc.frequency.value = hz(note);
+          osc.detune.value = cents;
+          osc.connect(amp);
+          sources.push(osc);
+        }
+      }
+    }
+    const minimumLiveGate = Math.min(.12, attack + .025);
+    let stopped = false;
+    const voice = {
+      scheduled: gate !== null,
+      stop: (at, hard = false) => {
+        if (stopped && !hard) return;
+        stopped = true;
+        const earliest = gate === null && !drum ? minimumLiveGate : .006;
+        const end = hard ? at + .009 : Math.max(at, time + earliest);
+        if (end < time) {
+          amp.gain.cancelScheduledValues(at);
+          amp.gain.setValueAtTime(0, at);
+        } else {
+          if (amp.gain.cancelAndHoldAtTime) {
+            amp.gain.cancelAndHoldAtTime(end);
+          } else {
+            const elapsed = end - time;
+            const level = elapsed < attack
+              ? .0001 * (peak / .0001) ** (elapsed / attack)
+              : peak * (sustain / peak) ** clamp((elapsed - attack - hold) / decay, 0, 1);
+            amp.gain.cancelScheduledValues(end);
+            amp.gain.setValueAtTime(level, end);
+          }
+          amp.gain.setTargetAtTime(.0001, end, hard ? .003 : release / 5);
+        }
+        for (const source of sources) source.stop(end + (hard ? .014 : release));
+      }
+    };
+    this.voices.add(voice);
+    let remaining = sources.length;
+    for (const source of sources) {
+      source.onended = () => {
+        if (--remaining) return;
+        amp.disconnect();
+        this.voices.delete(voice);
+      };
+      source.start(time);
+    }
+    if (drum || gate !== null) voice.stop(time + (drum ? attack + hold + decay : gate));
+    return voice.stop;
+  }
+
+  stopSequence() {
+    for (const voice of this.voices) {
+      if (voice.scheduled) voice.stop(this.ctx.currentTime, true);
+    }
+  }
+}
+
+const interval = (start, length = 8) => Array.from({ length }, (_, index) => start + index);
+const controls = {};
+for (let i = 0; i < 8; i++) {
+  controls['fader-' + i] = 'Fader ' + (i + 1);
+  controls['select-' + i] = 'Upper button ' + (i + 1);
+  controls['lower-' + i] = 'Lower button ' + (i + 1);
+  for (let row = 0; row < 3; row++) controls['knob-' + i + '-' + row] = ['Top', 'Middle', 'Bottom'][row] + ' knob ' + (i + 1);
+}
+Object.assign(controls, { play: 'Play / stop', record: 'Record', keys: 'Keys mode', shift: 'Modifier',
+  pageUp: 'Next control page', pageDown: 'Previous control page', previous: 'Previous eight steps', next: 'Next eight steps' });
+
+function mapGroup(map, type, numbers, action, row = 0) {
+  numbers.forEach((number, index) => { map[type + ':' + number] = action + '-' + index + (action === 'knob' ? '-' + row : ''); });
+}
+const legacy = {};
+mapGroup(legacy, 176, interval(77), 'fader');
+[13,29,49].forEach((start, row) => mapGroup(legacy, 176, interval(start), 'knob', row));
+mapGroup(legacy, 144, [41,42,43,44,57,58,59,60], 'select');
+mapGroup(legacy, 144, [73,74,75,76,89,90,91,92], 'lower');
+Object.assign(legacy, { '176:104': 'pageDown', '176:105': 'pageUp',
+  '176:106': 'previous', '176:107': 'next', '144:105': 'shift',
+  '144:106': 'keys', '144:107': 'record' });
+
+const xl3 = {};
+mapGroup(xl3, 176, interval(5), 'fader');
+[13,21,29].forEach((start, row) => mapGroup(xl3, 176, interval(start), 'knob', row));
+mapGroup(xl3, 176, interval(37), 'select');
+mapGroup(xl3, 176, interval(45), 'lower');
+Object.assign(xl3, { '176:106': 'pageUp', '176:107': 'pageDown', '176:103': 'previous', '176:102': 'next',
+  '176:116': 'play', '176:118': 'record', '176:63': 'shift', '176:65': 'record', '176:66': 'keys', '176:104': 'keys' });
+const relative = {};
+[77,85,93].forEach((start, row) => mapGroup(relative, 176, interval(start), 'knob', row));
+
+function setupMIDI(actions) {
+  const button = document.getElementById('midi');
+  const port = document.getElementById('port');
+  const profile = document.getElementById('profile');
+  const target = document.getElementById('learnTarget');
+  const learn = document.getElementById('learn');
+  const reset = document.getElementById('resetMap');
+  const activity = document.getElementById('midiActivity');
+  const ledTest = document.getElementById('testLED');
+  target.replaceChildren(...Object.entries(controls).map(([id, label]) => new Option(label, id)));
+  let access, active, output, selectedId, learning = false, shifted = false, attached = false, legacyChannel = 8;
+  let dawLEDs = false;
+  let legacyTemplate = 8;
+  const sent = new Map();
+  let learned = {};
+  try { learned = JSON.parse(localStorage.getItem('dimi-midi-v1')) || {}; } catch {}
+
+  function save() {
+    try { localStorage.setItem('dimi-midi-v1', JSON.stringify(learned)); } catch {}
+  }
+  function detach() {
+    if (active) active.onmidimessage = null;
+    ledTest.disabled = true;
+    try {
+      if (dawLEDs) {
+        output.send([182, 71, 0]);
+        output.send([159, 12, 0]);
+      }
+    } catch {}
+    sent.clear();
+    dawLEDs = false;
+    output = undefined;
+    active = undefined;
+    shifted = false;
+    actions.releaseAll();
+  }
+  function receive(event) {
+    if (!attached) return;
+    const [status, number, value] = event.data;
+    if (status === 240 && event.data.length === 9 && [0, 32, 41, 2, 17, 119].every((byte, i) => event.data[i + 1] === byte)) {
+      legacyTemplate = event.data[7];
+      sent.clear();
+      feedback();
+      return;
+    }
+    if (dawLEDs && status === 190 && number >= 5 && number <= 36) {
+      if (value) actions.touch(number < 13 ? -1 : Math.floor((number - 13) / 8), number < 13 ? number - 5 : (number - 13) % 8);
+      return;
+    }
+    const message = status & 240;
+    if (message !== 128 && message !== 144 && message !== 176) return;
+    const type = message === 128 ? 144 : message;
+    const channel = status & 15;
+    const customKey = type + ':' + channel + ':' + number;
+    const baseKey = type + ':' + number;
+    if (profile.value === 'legacy' && legacy[baseKey] && channel !== legacyChannel) {
+      legacyChannel = channel;
+      if (!access.sysexEnabled) legacyTemplate = channel;
+      sent.clear();
+      feedback();
+    }
+    const custom = learned[active.id] ||= {};
+    const on = message !== 128 && value > 0;
+    if (learning) {
+      const id = target.value;
+      if ((id.startsWith('knob') || id.startsWith('fader')) ? message !== 176 : !on) return;
+      for (const key of Object.keys(custom)) if (custom[key] === id) delete custom[key];
+      custom[customKey] = id;
+      save();
+      learning = false;
+      learn.textContent = 'Learn';
+      actions.status('Mapped · ' + controls[id]);
+      return;
+    }
+    const modern = profile.value === 'xl3';
+    const rel = modern && channel === 15 && relative[baseKey];
+    const mapped = modern ? ((channel === 15 || channel === 0 || channel === 6) ? xl3[baseKey] : undefined) : legacy[baseKey];
+    const action = custom[customKey] || rel || mapped;
+    activity.textContent = `MIDI ch ${channel + 1} · ${type === 176 ? 'CC' : 'note'} ${number} · ${value} · ${controls[action] || 'unmapped'}`;
+    if (!action) {
+      if (!on) actions.releasePad('midi-' + customKey);
+      return;
+    }
+    const [kind, index, row] = action.split('-');
+    if (kind === 'fader' || kind === 'knob') {
+      actions.continuous(kind, +index, +row, value, Boolean(rel));
+      return;
+    }
+    const key = 'midi-' + customKey;
+    if (!on) {
+      actions.releasePad(key);
+      if (action === 'shift') shifted = false;
+      return;
+    }
+    if (action === 'shift') shifted = true;
+    else if (kind === 'select') {
+      const modified = shifted && [actions.transport, actions.toggleRecord, actions.toggleKeys][+index];
+      if (modified) modified();
+      else actions.selectTrack(+index);
+    } else if (kind === 'lower') {
+      actions.lower(+index, true, key);
+    } else {
+      ({ play: actions.transport, record: actions.toggleRecord, keys: actions.toggleKeys,
+        pageUp: () => actions.page(1), pageDown: () => actions.page(-1),
+        previous: () => actions.stepBank(-1), next: () => actions.stepBank(1) })[action]?.();
+    }
+  }
+  async function refresh() {
+    const ports = [...access.inputs.values()].filter(input => input.state === 'connected');
+    port.replaceChildren(new Option('Choose MIDI input', ''), ...ports.map(input => new Option(input.name || input.id, input.id)));
+    if (!selectedId) {
+      const novation = ports.filter(input => /launch control|lcxl/i.test(input.name || '') && !/hui/i.test(input.name || ''));
+      selectedId = (novation.find(input => /daw/i.test(input.name)) || novation[0] || (ports.length === 1 && ports[0]))?.id;
+    }
+    const input = ports.find(candidate => candidate.id === selectedId);
+    port.value = input?.id || '';
+    if (input && input === active) return;
+    detach();
+    if (!input) {
+      button.textContent = 'Cancel MIDI';
+      actions.status(ports.length ? 'Choose an input under MIDI mapping.' : 'Connect your Launch Control XL over USB.');
+      return;
+    }
+    active = input;
+    profile.value = /xl\s*3|lcxl3|daw/i.test(input.name || '') ? 'xl3' : 'legacy';
+    const modern = profile.value === 'xl3';
+    const outputs = [...access.outputs.values()].filter(candidate => candidate.state === 'connected');
+    const portName = name => (name || '').replace(/\b(?:in|out)\b/gi, '').replace(/[^a-z0-9]/gi, '').toLowerCase();
+    output = outputs.find(candidate => portName(candidate.name) === portName(input.name));
+    if (!output && /launch control|lcxl/i.test(input.name || '')) {
+      const matches = outputs.filter(candidate =>
+        /launch control|lcxl/i.test(candidate.name || '') && /daw/i.test(candidate.name) === /daw/i.test(input.name));
+      if (matches.length === 1) output = matches[0];
+    }
+    dawLEDs = Boolean(modern && output && /daw/i.test(input.name));
+    const connectedOutput = output;
+    try {
+      await input.open?.();
+      if (active !== input) return;
+      input.onmidimessage = receive;
+    } catch (error) {
+      detach();
+      button.textContent = 'Cancel MIDI';
+      actions.status('Could not open MIDI input. Unplug and reconnect the controller, then retry.');
+      console.error(error);
+      return;
+    }
+    try {
+      await connectedOutput?.open?.();
+      if (active !== input) return;
+      if (dawLEDs) {
+        connectedOutput.send([159, 12, 127]);
+        connectedOutput.send([182, 71, 127]);
+      }
+    } catch (error) {
+      output = undefined;
+      dawLEDs = false;
+      console.error(error);
+    }
+    if (active !== input) return;
+    legacyChannel = 8;
+    legacyTemplate = 8;
+    ledTest.disabled = !output || (modern && !dawLEDs);
+    feedback();
+    button.textContent = 'Disconnect MIDI';
+    actions.status(output ? '' : 'LED output unavailable');
+  }
+
+  button.onclick = async () => {
+    if (attached) {
+      attached = false;
+      access.onstatechange = null;
+      detach();
+      port.replaceChildren(new Option('Disconnected', ''));
+      button.textContent = 'Connect MIDI';
+      actions.status('');
+      return;
+    }
+    if (!navigator.requestMIDIAccess) {
+      actions.status('This browser does not expose Web MIDI. Open the file in desktop Chrome or Brave.');
+      return;
+    }
+    button.disabled = true;
+    try {
+      actions.unlockAudio();
+      try {
+        access = await navigator.requestMIDIAccess({ sysex: true });
+      } catch {
+        access = await navigator.requestMIDIAccess();
+      }
+      attached = true;
+      access.onstatechange = refresh;
+      await refresh();
+    } catch (error) {
+      attached = false;
+      detach();
+      actions.status(location.protocol === 'file:'
+        ? 'MIDI permission failed for this file. Open the local launcher and allow MIDI access in the browser.'
+        : 'MIDI permission denied. Allow MIDI access for localhost and try again.');
+      console.error(error);
+    } finally {
+      button.disabled = false;
+    }
+  };
+  port.onchange = () => {
+    selectedId = port.value;
+    if (access && attached) refresh();
+  };
+  ledTest.onclick = () => {
+    if (!output) return;
+    const testOutput = output;
+    try {
+      if (dawLEDs) {
+        for (const id of interval(37, 16)) testOutput.send([176, id, 21]);
+      } else {
+        testOutput.send([176 + legacyChannel, 0, 126]);
+      }
+      setTimeout(() => {
+        if (output !== testOutput) return;
+        if (!dawLEDs) testOutput.send([176 + legacyChannel, 0, 0]);
+        sent.clear();
+        feedback();
+      }, 450);
+    } catch (error) {
+      actions.status('MIDI output could not send the light test.');
+      console.error(error);
+    }
+  };
+  profile.onchange = () => {
+    shifted = false;
+    sent.clear();
+    actions.releaseAll();
+    feedback();
+  };
+  learn.onclick = () => {
+    if (!active) return actions.status('Connect a MIDI input first.');
+    learning = !learning;
+    learn.textContent = learning ? 'Cancel' : 'Learn';
+    actions.status(learning ? 'Move or press · ' + controls[target.value] : '');
+  };
+  reset.onclick = () => {
+    if (!active) return;
+    delete learned[active.id];
+    save();
+    actions.status('Restored the default profile.');
+  };
+  function feedback() {
+    if (!output) return;
+    const modern = profile.value === 'xl3';
+    if (modern && !dawLEDs) return;
+    const state = actions.lights();
+    const send = (command, number, value) => {
+      const id = command * 128 + number;
+      if (sent.get(id) === value) return;
+      try {
+        output.send([command, number, value]);
+        sent.set(id, value);
+      } catch (error) {
+        console.warn('MIDI LED output unavailable', error);
+      }
+    };
+    const upper = modern ? interval(37) : [41,42,43,44,57,58,59,60];
+    const lower = modern ? interval(45) : [73,74,75,76,89,90,91,92];
+    for (let i = 0; i < 8; i++) {
+      const movingFader = state.touched?.row === -1 && state.touched.index === i;
+      send(modern ? 176 : 144 + legacyChannel, upper[i], modern
+        ? (movingFader ? 21 : state.selected === i ? 3 : 1)
+        : (movingFader ? 60 : state.selected === i ? 63 : 13));
+      send(modern ? 176 : 144 + legacyChannel, lower[i], modern ? (state.steps[i] ? 21 : 0) : (state.steps[i] ? 60 : 12));
+    }
+    const knobLEDs = [];
+    for (let row = 0; row < 3; row++) {
+      for (let i = 0; i < 8; i++) {
+        const index = row * 8 + i;
+        if (modern) {
+          send(176, 13 + index, 21);
+        } else if (access.sysexEnabled) {
+          knobLEDs.push(index, 28);
+        } else {
+          send(144 + legacyChannel, [13, 29, 49][row] + i, 28);
+        }
+      }
+    }
+    if (knobLEDs.length) {
+      const signature = knobLEDs.join(',');
+      if (sent.get('knobs') !== signature) {
+        try {
+          output.send([240, 0, 32, 41, 2, 17, 120, legacyTemplate, ...knobLEDs, 247]);
+          sent.set('knobs', signature);
+        } catch (error) {
+          console.warn('Could not update Launch Control XL knob LEDs', error);
+        }
+      }
+    }
+    if (modern) {
+      send(176, 116, state.playing ? 21 : 0);
+      send(176, 118, state.recording ? 5 : 0);
+    }
+  }
+  window.addEventListener('pagehide', detach);
+  return feedback;
+}
+
+
+const $ = id => document.getElementById(id);
+const names = ['Kick', 'Clap', 'Hat', 'Metal', 'Bass', 'Stab', 'Pad', 'Texture'];
+const scale = [0, 2, 3, 5, 7, 8, 10, 12];
+const drumRoot = 36;
+const roots = [drumRoot, drumRoot, drumRoot, drumRoot, 33, 45, 45, 45];
+const pages = [
+  ['cutoff', 'delay', 'reverb'], ['resonance', 'decay', 'character'],
+  ['rate', 'depth', 'cutoff'], ['attack', 'sustain', 'release']
+];
+const labels = { cutoff: 'Cutoff', delay: 'Delay', reverb: 'Reverb', resonance: 'Resonance',
+  decay: 'Decay', character: 'Drive', rate: 'LFO rate', depth: 'LFO depth', attack: 'Attack', sustain: 'Sustain', release: 'Release' };
+function parameterLabel(name, index) {
+  if (name === 'character' && index >= 5) return 'Chorus';
+  if (name === 'sustain' && index < 4) return 'Hold';
+  return labels[name];
+}
+const patches = [
+  ['Deep', 'Tight', 'Hard'], ['Soft', 'Dry', 'Sharp'], ['Closed', 'Bright', 'Open'], ['Low', 'Hollow', 'Bright'],
+  ['Saw', 'Triangle', 'Square'], ['Soft', 'Bright', 'Round'], ['Warm', 'Air', 'Pure'], ['Dust', 'Air', 'Static']
+];
+const filled = (at, notes, gate = 1, velocity = .8) => ({ at, notes, gate, velocity });
+const noteName = note => ['C', 'C♯', 'D', 'D♯', 'E', 'F', 'F♯', 'G', 'G♯', 'A', 'A♯', 'B'][note % 12] + (Math.floor(note / 12) - 1);
+const button = (text, callback, className = '') => Object.assign(document.createElement('button'), { textContent: text, onclick: callback, className });
+const pressed = (element, state) => element.setAttribute('aria-pressed', String(Boolean(state)));
+
+function technoPattern(tracks) {
+  Object.assign(tracks[0], { patch: 1, cutoff: .78, decay: .43 });
+  Object.assign(tracks[1], { length: 2, patch: 1, volume: .42, decay: .24, delay: .02, reverb: .07 });
+  Object.assign(tracks[2], { length: 2, patch: 0, volume: .51, cutoff: .96, decay: .18, delay: .09, reverb: .06 });
+  Object.assign(tracks[3], { length: 2, patch: 1, volume: .55, cutoff: .81, decay: .30, delay: .17, reverb: .09 });
+  Object.assign(tracks[4], { patch: 1, volume: .59, cutoff: .53, decay: .31, release: .17, depth: 0 });
+  return [
+    [0, 4, 8, 12].map(at => filled(at, [36], 1, 1)),
+    [filled(12, [36], 1, .73), filled(23, [38], 1, .33), filled(28, [36], 1, .77)],
+    [2, 5, 6, 10, 14, 18, 21, 22, 26, 29, 30, 31].map((at, i) =>
+      filled(at, [36], 1, [.75, .23, .54, .66, .48, .70, .22, .58, .62, .26, .53, .32][i])),
+    [filled(3, [36], 1, .85), filled(7, [41], 1, .48), filled(11, [36], 1, .71),
+      filled(15, [39], 1, .54), filled(19, [36], 1, .82), filled(24, [41], 1, .46),
+      filled(27, [36], 1, .76), filled(31, [34], 1, .63)],
+    [filled(6, [33], 1.4, .74), filled(13, [33], .75, .67),
+      filled(20, [33], 1.3, .76), filled(29, [36], .8, .57)],
+    [], [], []
+  ];
+}
+
+function hypnoticSession(tracks) {
+  Object.assign(tracks[0], { length: 1, volume: .89, cutoff: .58, decay: .65 });
+  Object.assign(tracks[4], {
+    length: 1, patch: 1, volume: .83, cutoff: .41, decay: .4, release: .11,
+    delay: 0, reverb: 0, resonance: .04, rate: .06, depth: .13
+  });
+  Object.assign(tracks[5], {
+    length: 2, patch: 0, volume: .49, cutoff: .48, decay: .21, resonance: .21,
+    delay: .31, reverb: .08, rate: .11, depth: .23
+  });
+  return [
+    [0, 4, 8, 12].map(at => filled(at, [36], 1, 1)),
+    [], [], [],
+    [2, 6, 10, 14].map(at => filled(at, [33], 1.65, .83)),
+    [3, 10, 15, 19, 26, 31].map((at, i) =>
+      filled(at, [52], .7, i % 3 === 0 ? .66 : .36)),
+    [], []
+  ];
+}
+
+function session(preset) {
+  const ambient = preset === 'ambient';
+  const hypnotic = preset === 'hypnotic';
+  const tracks = names.map((_, i) => ({
+    length: i >= 6 ? 4 : i >= 4 ? 2 : 1, steps: Array(64).fill(null), patch: 0,
+    volume: [.86,.56,.49,.43,.63,.49,.57,.38][i], mute: false,
+    cutoff: [.7,.86,.96,.75,.54,.65,.68,.57][i], delay: [0,.10,.05,.23,.07,.32,.25,.2][i],
+    reverb: [0,.15,.12,.27,.04,.27,.47,.52][i], resonance: i === 4 ? .18 : .04,
+    decay: [.68,.44,.27,.36,.39,.31,.75,.68][i], character: i >= 5 ? .27 : .08,
+    attack: i >= 6 ? .56 : .04, sustain: i >= 6 ? .69 : i === 4 ? .48 : .22,
+    release: i >= 6 ? .77 : .21, rate: i === 4 ? .69 : .1,
+    depth: i === 4 ? .24 : i >= 6 ? .36 : 0
+  }));
+  if (preset === 'blank') {
+    tracks.forEach(track => Object.assign(track, {
+      length: 1, cutoff: 1, delay: 0, reverb: 0, resonance: 0, character: 0, depth: 0
+    }));
+    return { preset, tempo: 128, tracks };
+  }
+  let pattern;
+  if (hypnotic) {
+    pattern = hypnoticSession(tracks);
+  } else if (ambient) {
+    tracks[4].cutoff = .36;
+    pattern = [
+      [], [],
+      [filled(10, [36], 1, .27)], [filled(15, [36], 1, .35)],
+      [filled(0, [33], 11), filled(16, [33], 11)],
+      [filled(12, [57,60,67], 6, .69), filled(26, [57,64,71], 6, .69)],
+      [filled(0, [45,52,60], 28, .73), filled(32, [41,48,55,64], 27, .7)],
+      [filled(0, [57], 32, .66), filled(42, [60], 15, .65)]
+    ];
+  } else {
+    pattern = technoPattern(tracks);
+  }
+  pattern.forEach((events, index) => events.forEach(({ at, ...step }) => { tracks[index].steps[at] = step; }));
+  return { preset, tempo: ambient ? 86 : hypnotic ? 132 : 128, tracks };
+}
+
+let state = session('blank');
+try {
+  const saved = JSON.parse(localStorage.getItem('dimi-session-v1'));
+  if (saved?.tracks?.length === 8 && saved.tracks.every(track => track.steps?.length === 64)) state = saved;
+} catch {}
+let saveTimeout;
+function save() {
+  clearTimeout(saveTimeout);
+  saveTimeout = setTimeout(() => {
+    try { localStorage.setItem('dimi-session-v1', JSON.stringify(state)); } catch {}
+  }, 120);
+}
+
+let audio, timer, playing = false, recording = false, keys = false;
+let updateLights;
+let stepButtons = [];
+let touched, touchTimer, touchedInput;
+let selected = 0, page = 0, chosen = 0, bank = 0, nextTime = 0, position = 0, visibleStep = -1, queued;
+const scheduled = [];
+const held = new Map();
+const launches = new Set();
+const stepTime = () => 15 / state.tempo;
+function status(message) {
+  $('status').textContent = message;
+  $('status').hidden = !message;
+}
+async function startAudio() {
+  if (!audio) {
+    audio = new Audio(state.tracks);
+    updateAudio();
+  }
+  if (audio.ctx.state !== 'running') await audio.ctx.resume();
+  if (audio.ctx.state !== 'running') throw new Error('Audio output is suspended');
+  return audio;
+}
+function updateAudio() {
+  state.tracks.forEach((track, i) => audio?.update(i, track, state.tempo));
+}
+function playbackStatus() {
+  const hasNotes = track => track.steps.slice(0, track.length * 16).some(Boolean);
+  const message = !playing || state.tracks.some(track => !track.mute && track.volume > 0 && hasNotes(track))
+    ? '' : state.tracks.some(hasNotes)
+      ? 'Raise a fader on a track with active steps to hear it.'
+      : 'The loop is empty. Turn on a step to hear it.';
+  $('playbackStatus').textContent = message;
+  $('playbackStatus').hidden = !message;
+}
+function tick() {
+  const now = audio.ctx.currentTime;
+  if (nextTime < now - .12) nextTime = now + .012;
+  while (nextTime < now + .08) {
+    if (queued && position % 16 === 0) applyPreset(queued);
+    scheduled.push({ time: nextTime, position });
+    state.tracks.forEach((track, index) => {
+      const step = track.steps[position % (track.length * 16)];
+      if (step && !track.mute) audio.hit(index, track, step.notes, nextTime, step.gate * stepTime(), step.velocity);
+    });
+    position++;
+    nextTime += stepTime();
+  }
+}
+function animate() {
+  if (!playing) return;
+  let latest;
+  while (scheduled[0]?.time <= audio.ctx.currentTime) latest = scheduled.shift();
+  if (latest) {
+    const previous = visibleStep;
+    visibleStep = latest.position;
+    const length = state.tracks[selected].length * 16;
+    stepButtons[previous % length]?.classList.remove('cursor');
+    stepButtons[visibleStep % length]?.classList.add('cursor');
+  }
+  requestAnimationFrame(animate);
+}
+
+function runTick() {
+  try {
+    tick();
+  } catch (error) {
+    console.error(error);
+    transport();
+    status('Playback stopped after an audio error. Click Play to retry.');
+  }
+}
+
+let starting = false;
+async function transport() {
+  if (starting) return;
+  if (playing) {
+    playing = false;
+    clearInterval(timer);
+    try { audio.stopSequence(); } catch (error) { console.error(error); }
+    scheduled.length = 0;
+    visibleStep = -1;
+    if (queued) applyPreset(queued);
+  } else {
+    starting = true;
+    try {
+      await startAudio();
+    } catch (error) {
+      status('Audio could not start. Click Play to try again.');
+      console.error(error);
+      return;
+    } finally {
+      starting = false;
+    }
+    playing = true;
+    position = 0;
+    nextTime = audio.ctx.currentTime + .04;
+    timer = setInterval(runTick, 22);
+    requestAnimationFrame(animate);
+    runTick();
+  }
+  $('play').textContent = playing ? '■ Stop' : '▶ Play';
+  pressed($('play'), playing);
+  playbackStatus();
+  updateLights?.();
+  renderSteps();
+}
+function applyPreset(name) {
+  releaseAll();
+  state = session(name);
+  if (name === 'blank') audio?.resetEffects();
+  queued = undefined;
+  chosen = 0;
+  bank = 0;
+  $('preset').value = name;
+  $('tempo').value = state.tempo;
+  updateAudio();
+  renderMixer();
+  renderPattern();
+  save();
+  if ($('status').textContent.startsWith('Queued')) status('');
+}
+function choosePreset(name) {
+  if (playing) {
+    queued = name;
+    status('Queued · ' + $('preset').selectedOptions[0].textContent);
+  } else {
+    applyPreset(name);
+  }
+}
+function touchControl(row, index) {
+  const name = row === -1 ? 'volume' : pages[page][row];
+  touchedInput?.classList.remove('touched');
+  touchedInput = $('mixer').children[index]?.querySelector(`[data-param=${name}]`);
+  touchedInput?.classList.add('touched');
+  touched = { row, index };
+  updateLights?.();
+  clearTimeout(touchTimer);
+  touchTimer = setTimeout(() => {
+    touched = undefined;
+    touchedInput?.classList.remove('touched');
+    touchedInput = undefined;
+    updateLights?.();
+  }, 450);
+}
+
+function setParam(index, name, value) {
+  const track = state.tracks[index];
+  track[name] = value;
+  audio?.update(index, track, state.tempo);
+  if (name === 'volume') playbackStatus();
+  save();
+}
+function selectTrack(index) {
+  releaseAll();
+  selected = index;
+  chosen = 0;
+  bank = 0;
+  updateMixer();
+  renderPattern();
+}
+function setPage(value) {
+  page = (value + pages.length) % pages.length;
+  renderMixer();
+}
+function toggleKeys() {
+  releaseAll();
+  keys = !keys;
+  renderPattern();
+}
+function toggleRecord() {
+  recording = !recording;
+  pressed($('record'), recording);
+  updateLights?.();
+  if (recording && !playing) transport();
+}
+
+const octaveOf = index => state.tracks[index].octave ?? 0;
+const keyNote = (index, key) => roots[index] + scale[key] + octaveOf(index) * 12;
+
+function keyLabel(i) {
+  return noteName(keyNote(selected, i));
+}
+async function pressPad(i, key) {
+  if (!keys || held.has(key) || [...launches].some(token => token.key === key)) return;
+  const trackIndex = selected;
+  const token = { key };
+  launches.add(token);
+  try {
+    await startAudio();
+    if (!launches.has(token) || !keys) return;
+  } catch (error) {
+    status('Audio could not start.');
+    console.error(error);
+    return;
+  } finally {
+    launches.delete(token);
+  }
+  const track = state.tracks[trackIndex];
+  const note = keyNote(trackIndex, i);
+  const velocity = .9;
+  const now = audio.ctx.currentTime;
+  const stop = audio.hit(trackIndex, track, [note], now + .006, null, velocity);
+  const record = recording && playing;
+  const raw = position + (now - nextTime) / stepTime();
+  const absolute = Math.max(0, Math.round(raw));
+  const at = absolute % (track.length * 16);
+  let step;
+  if (record) {
+    step = track.steps[at] ?? { notes: [], gate: 1, velocity };
+    if (!step.notes.includes(note)) step.notes = [...step.notes, note].slice(-8);
+    track.steps[at] = step;
+    renderSteps();
+    updateMixer();
+    save();
+  }
+  held.set(key, { stop, now, step, i });
+  if (token.released) releasePad(key);
+  else updateMixer();
+}
+function releasePad(key) {
+  for (const token of launches) if (token.key === key) token.released = true;
+  const voice = held.get(key);
+  if (!voice) return;
+  const now = audio.ctx.currentTime;
+  voice.stop(now);
+  if (voice.step) {
+    voice.step.gate = clamp(Math.round((now - voice.now) / stepTime() * 4) / 4, .25, 64);
+    save();
+    renderSteps();
+  }
+  held.delete(key);
+  updateMixer();
+}
+function releaseAll() {
+  launches.clear();
+  for (const key of [...held.keys()]) releasePad(key);
+}
+function lower(i, active, key) {
+  if (!active) return releasePad(key);
+  if (keys) return pressPad(i, key);
+  toggleStep(bank * 8 + i);
+}
+
+function updateMixer() {
+  for (const [i, column] of [...$('mixer').children].entries()) {
+    pressed(column.querySelector('.track'), selected === i);
+  }
+  if (keys) {
+    for (const [i, key] of [...$('keyboard').children].entries()) {
+      const label = keyLabel(i);
+      key.textContent = label;
+      key.setAttribute('aria-label', 'Play ' + names[selected] + ' ' + label);
+      pressed(key, [...held.values()].some(note => note.i === i));
+    }
+  }
+  pressed($('keys'), keys);
+  updateLights?.();
+}
+
+function dialValue(input, index, name) {
+  const value = state.tracks[index][name];
+  input.value = value;
+  input.parentElement.style.setProperty('--angle', `${Number(input.value) * 270 - 135}deg`);
+  let display = Math.round(value * 100) + '%';
+  if (name === 'cutoff') display = Math.round(cutoff(value, index)) + ' Hz';
+  if (name === 'rate') display = lfoRate(value, state.tempo).toFixed(2) + ' Hz';
+  if (name === 'attack') display = Math.round(1000 * attackTime(value, index)) + ' ms';
+  if (name === 'sustain' && index < 4) display = Math.round(1000 * holdTime(value)) + ' ms';
+  if (name === 'release') display = releaseTime(value, index).toFixed(2) + ' s';
+  input.title = display;
+  input.setAttribute('aria-valuetext', display);
+  input.parentElement.nextElementSibling.textContent = parameterLabel(name, index);
+}
+function renderMixer() {
+  for (const element of $('pages').children) pressed(element, +element.dataset.page === page);
+  $('mixer').replaceChildren(...state.tracks.map((track, index) => {
+    const column = document.createElement('div');
+    column.className = 'channel';
+    const controls = pages[page];
+    for (const name of controls) {
+      const label = document.createElement('label');
+      label.className = 'knob';
+      const ring = document.createElement('span');
+      ring.className = 'dial';
+      const input = Object.assign(document.createElement('input'), {
+        type: 'range', min: 0, max: 1, step: .001
+      });
+      input.dataset.param = name;
+      input.setAttribute('aria-label', names[index] + ' ' + (parameterLabel(name, index)));
+      ring.append(input);
+      label.append(ring, document.createElement('span'));
+      dialValue(input, index, name);
+      input.oninput = () => {
+        setParam(index, name, +input.value);
+        dialValue(input, index, name);
+        touchControl(controls.indexOf(name), index);
+      };
+      column.append(label);
+    }
+    const fader = Object.assign(document.createElement('input'), {
+      type: 'range', min: 0, max: 1, step: .001, value: track.volume, className: 'fader'
+    });
+    fader.setAttribute('aria-label', names[index] + ' volume');
+    fader.dataset.param = 'volume';
+    fader.oninput = () => {
+      setParam(index, 'volume', +fader.value);
+      touchControl(-1, index);
+    };
+    column.append(fader, button(names[index], () => selectTrack(index), 'track'));
+    return column;
+  }));
+  updateMixer();
+}
+
+function buildKeyboard() {
+  $('keyboard').replaceChildren(...scale.map((_, index) => {
+    const key = button('', event => {
+      if (!event.detail) {
+        const id = 'accessible-' + index;
+        pressPad(index, id);
+        setTimeout(() => releasePad(id), 190);
+      }
+    }, 'piano-key');
+    key.onpointerdown = event => {
+      if (event.button !== 0) return;
+      key.setPointerCapture(event.pointerId);
+      pressPad(index, 'pointer-' + event.pointerId);
+    };
+    key.onpointerup = key.onpointercancel = key.onlostpointercapture = event => releasePad('pointer-' + event.pointerId);
+    return key;
+  }));
+}
+
+function toggleStep(index) {
+  const track = state.tracks[selected];
+  chosen = index;
+  bank = Math.floor(index / 8);
+  track.steps[index] = track.steps[index] ? null : { notes: [roots[selected]], gate: 1, velocity: .82 };
+  save();
+  renderPattern();
+}
+
+function moveStepBank(delta) {
+  if (keys) {
+    const octave = clamp(octaveOf(selected) + delta, -2, 2);
+    if (octave === octaveOf(selected)) return;
+    releaseAll();
+    state.tracks[selected].octave = octave;
+    renderPattern();
+    save();
+    return;
+  }
+  const lastBank = state.tracks[selected].length * 2 - 1;
+  bank = clamp(bank + delta, 0, lastBank);
+  chosen = bank * 8;
+  renderPattern();
+}
+
+function renderSteps() {
+  const track = state.tracks[selected];
+  const octave = octaveOf(selected);
+  $('steps').hidden = keys;
+  $('keyboard').hidden = !keys;
+  $('length').hidden = keys;
+  $('editor').hidden = keys;
+  $('octave').hidden = !keys;
+  $('octave').textContent = 'Oct ' + (octave > 0 ? '+' : '') + octave;
+  for (const [id, delta] of [['previousSteps', -1], ['nextSteps', 1]]) {
+    const arrow = $(id);
+    arrow.disabled = keys ? Math.abs(octave + delta) > 2
+      : bank + delta < 0 || bank + delta >= track.length * 2;
+    arrow.setAttribute('aria-label', keys ? (delta < 0 ? 'Octave down' : 'Octave up')
+      : (delta < 0 ? 'Previous eight steps' : 'Next eight steps'));
+  }
+  if (keys) return;
+  stepButtons = track.steps.slice(0, track.length * 16).map((step, index) => {
+    const selectNote = () => {
+      chosen = index;
+      bank = Math.floor(index / 8);
+      renderPattern();
+      stepButtons[index].focus();
+    };
+    const element = button('', event => {
+      if (event?.shiftKey && selected >= 4 && step) {
+        selectNote();
+        return;
+      }
+      toggleStep(index);
+      stepButtons[index].focus();
+    }, 'step');
+    if (selected >= 4 && step) {
+      element.title = 'Shift-click or right-click to edit this note';
+      element.oncontextmenu = event => {
+        event.preventDefault();
+        selectNote();
+      };
+    }
+    const mark = document.createElement('span');
+    mark.className = 'step-mark';
+    mark.setAttribute('aria-hidden', 'true');
+    element.append(mark);
+    pressed(element, step);
+    element.setAttribute('aria-label', `Bar ${Math.floor(index / 16) + 1}, step ${index % 16 + 1}${step && selected >= 4 ? ', ' + step.notes.map(noteName).join(' ') : ''}`);
+    element.classList.toggle('chosen', selected >= 4 && Boolean(step) && chosen === index);
+    element.classList.toggle('cursor', visibleStep % (track.length * 16) === index);
+    return element;
+  });
+  const bars = Array.from({ length: track.length }, (_, bar) => {
+    const row = document.createElement('div');
+    row.className = 'pattern-bar';
+    for (let half = 0; half < 2; half++) {
+      const group = document.createElement('div');
+      const groupIndex = bar * 2 + half;
+      group.className = 'step-bank';
+      group.classList.toggle('current', !keys && groupIndex === bank);
+      group.append(...stepButtons.slice(groupIndex * 8, (groupIndex + 1) * 8));
+      row.append(group);
+    }
+    return row;
+  });
+  $('steps').replaceChildren(...bars);
+}
+
+function field(name, control, container = $('editor')) {
+  const label = document.createElement('label');
+  label.append(name, control);
+  container.append(label);
+}
+function selectField(name, values, current, change, container) {
+  const control = document.createElement('select');
+  control.replaceChildren(...values.map((value, i) => new Option(value, i)));
+  control.value = current;
+  control.onchange = () => change(+control.value);
+  field(name, control, container);
+}
+function renderEditor() {
+  const track = state.tracks[selected];
+  $('editor').replaceChildren();
+  $('soundField').replaceChildren();
+  selectField('Sound', patches[selected], track.patch, value => setParam(selected, 'patch', value), $('soundField'));
+  if (selected >= 4) {
+    const step = track.steps[chosen];
+    if (step) {
+      const first = Object.assign(document.createElement('input'), { type: 'number', min: 24, max: 96, value: step.notes[0] });
+      first.onchange = () => {
+        const root = clamp(Math.round(+first.value || step.notes[0]), 24, 96);
+        const delta = root - step.notes[0];
+        step.notes = step.notes.map(note => clamp(note + delta, 0, 127));
+        first.value = root;
+        renderSteps();
+        save();
+      };
+      first.title = 'MIDI note number';
+      field('Pitch', first);
+      const gate = Object.assign(document.createElement('input'), { type: 'number', min: .25, max: 64, step: .25, value: step.gate });
+      gate.onchange = () => {
+        step.gate = clamp(+gate.value || 1, .25, 64);
+        gate.value = step.gate;
+        save();
+      };
+      gate.title = 'Duration in sixteenth notes';
+      field('Duration', gate);
+    }
+  }
+}
+function renderPattern() {
+  $('patternTitle').textContent = names[selected];
+  $('length').value = state.tracks[selected].length;
+  updateMixer();
+  playbackStatus();
+  renderSteps();
+  renderEditor();
+}
+
+$('play').onclick = transport;
+$('record').onclick = toggleRecord;
+$('keys').onclick = toggleKeys;
+$('previousSteps').onclick = () => moveStepBank(-1);
+$('nextSteps').onclick = () => moveStepBank(1);
+$('tempo').value = state.tempo;
+$('tempo').onchange = () => {
+  state.tempo = clamp(+$('tempo').value || state.tempo, 40, 220);
+  $('tempo').value = state.tempo;
+  updateAudio();
+  save();
+};
+$('preset').value = state.preset;
+$('preset').onchange = () => choosePreset($('preset').value);
+$('resetSession').onclick = () => {
+  $('preset').value = 'blank';
+  choosePreset('blank');
+};
+$('length').onchange = () => {
+  state.tracks[selected].length = +$('length').value;
+  chosen = clamp(chosen, 0, +$('length').value * 16 - 1);
+  bank = Math.floor(chosen / 8);
+  renderPattern();
+  save();
+};
+$('pages').onclick = event => {
+  if (event.target.dataset.page !== undefined) {
+    setPage(+event.target.dataset.page);
+    renderEditor();
+  }
+};
+const keyboard = ['KeyA', 'KeyS', 'KeyD', 'KeyF', 'KeyG', 'KeyH', 'KeyJ', 'KeyK'];
+window.addEventListener('keydown', event => {
+  if (event.repeat || event.metaKey || event.ctrlKey || event.altKey || event.target.matches('input,select,textarea')) return;
+  if (event.code === 'Space' && !event.target.matches('button,summary')) {
+    event.preventDefault();
+    transport();
+  }
+  const index = keyboard.indexOf(event.code);
+  if (index !== -1) lower(index, true, event.code);
+});
+window.addEventListener('keyup', event => releasePad(event.code));
+window.addEventListener('blur', releaseAll);
+buildKeyboard();
+renderMixer();
+renderPattern();
+
+updateLights = setupMIDI({
+  lights: () => ({
+    selected, playing, recording, touched,
+    steps: keys ? Array.from({ length: 8 }, (_, i) => [...held.values()].some(note => note.i === i))
+      : state.tracks[selected].steps.slice(bank * 8, bank * 8 + 8)
+  }),
+  status, releaseAll, releasePad, lower, selectTrack, transport, toggleRecord, toggleKeys,
+  unlockAudio: () => startAudio().catch(console.error),
+  page: delta => { setPage(page + delta); renderEditor(); },
+  stepBank: moveStepBank,
+  touch: touchControl,
+  continuous: (type, index, row, raw, relative) => {
+    const name = type === 'fader' ? 'volume' : pages[page][row];
+    const value = relative ? clamp(state.tracks[index][name] + (raw - 64) / 100, 0, 1) : raw / 127;
+    setParam(index, name, value);
+    touchControl(type === 'fader' ? -1 : row, index);
+    const input = $('mixer').children[index].querySelector(`[data-param=${name}]`);
+    if (name === 'volume') input.value = value;
+    else dialValue(input, index, name);
+  }
+});
+</script>
+</body>
+</html>
