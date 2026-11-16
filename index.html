@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>MIDI DIMI</title>
-<meta name="description" content="An eight-track techno and ambient groovebox for the Launch Control XL.">
+<meta name="description" content="MIDI DIMI is a browser groovebox for techno and ambient loops, with a step sequencer, Web MIDI, and Launch Control XL support.">
 <style>
 :root { color-scheme: light; font: 14px ui-monospace,monospace; color:#000; background:#fff; }
 * {box-sizing:border-box}
@@ -35,7 +35,7 @@ button.primary:hover,button[aria-pressed=true]:hover {outline-color:#fff}
 input[type=number] {width:74px}
 label {display:inline-flex;align-items:center;gap:7px}
 .group {display:flex}
-.mixer-controls {display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.header-controls,.mixer-controls {display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .group button+button {border-left:0}
 .scroll {overflow:auto;padding:3px;margin:-3px}
 #mixer {display:grid;grid-template-columns:repeat(8,minmax(95px,1fr));min-width:760px;border:1px solid}
@@ -82,9 +82,9 @@ details p {max-width:78ch}
 </head>
 <body>
 <main>
-<header><h1>MIDI DIMI</h1><button id="midi">Connect MIDI</button></header>
+<header><h1>MIDI DIMI</h1><div class="header-controls"><button id="recordAudio" type="button" aria-pressed="false">Record Audio</button><button id="midi">Connect MIDI</button></div></header>
 <section class="transport" aria-label="Transport">
-<button id="play" class="primary">▶ Play</button><button id="record" aria-pressed="false">● Record</button><button id="recordAudio" type="button" aria-pressed="false">Record Audio</button>
+<button id="play" class="primary">▶ Play</button><button id="record" aria-pressed="false">● Record</button>
 <label>BPM <input id="tempo" type="number" min="40" max="220" value="128"></label>
 <label>Presets <select id="preset"><option value="blank">Blank</option><option value="techno">Techno</option><option value="hypnotic">Hypnotic</option><option value="ambient">Ambient</option></select></label>
 <button id="resetSession" type="button" title="Reset to a blank session">Reset</button>
