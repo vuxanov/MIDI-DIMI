@@ -84,7 +84,7 @@ details p {max-width:78ch}
 <main>
 <header><h1>MIDI DIMI</h1><button id="midi">Connect MIDI</button></header>
 <section class="transport" aria-label="Transport">
-<button id="play" class="primary">▶ Play</button><button id="record" aria-pressed="false">● Record</button>
+<button id="play" class="primary">▶ Play</button><button id="record" aria-pressed="false">● Record</button><button id="recordAudio" type="button" aria-pressed="false">Record Audio</button>
 <label>BPM <input id="tempo" type="number" min="40" max="220" value="128"></label>
 <label>Presets <select id="preset"><option value="blank">Blank</option><option value="techno">Techno</option><option value="hypnotic">Hypnotic</option><option value="ambient">Ambient</option></select></label>
 <button id="resetSession" type="button" title="Reset to a blank session">Reset</button>
@@ -158,6 +158,7 @@ class Audio {
     compressor.attack.value = .003;
     compressor.release.value = .12;
     master.connect(compressor).connect(ctx.destination);
+    this.output = compressor;
     this.master = master;
     this.reverbImpulse = this.buffer(4.6, (t, d) =>
       (Math.random() * 2 - 1) * (1 - t / d) ** 2.9 * Math.min(1, t / .018), 2);
@@ -434,6 +435,129 @@ class Audio {
     for (const voice of this.voices) {
       if (voice.scheduled) voice.stop(this.ctx.currentTime, true);
     }
+  }
+}
+
+// Loaded from a Blob so the groovebox remains a single HTML file.
+function registerStereoCapture() {
+  const encode = value => Math.round(Math.max(-1, Math.min(1, value)) * (value < 0 ? 32768 : 32767));
+  registerProcessor('stereo-capture', class extends AudioWorkletProcessor {
+    constructor() {
+      super();
+      this.frames = 0;
+      this.buffer = new DataView(new ArrayBuffer(4096 * 4));
+      this.port.onmessage = () => {
+        if (this.frames) this.flush();
+        this.port.postMessage({ done: true });
+        this.stopped = true;
+      };
+    }
+
+    flush() {
+      const chunk = this.buffer.buffer.slice(0, this.frames * 4);
+      this.port.postMessage({ chunk }, [chunk]);
+      this.frames = 0;
+    }
+
+    process(inputs) {
+      if (this.stopped) return false;
+      const [left, right = left] = inputs[0];
+      if (!left) return true;
+      for (let i = 0; i < left.length; i++) {
+        const offset = this.frames * 4;
+        this.buffer.setInt16(offset, encode(left[i]), true);
+        this.buffer.setInt16(offset + 2, encode(right[i]), true);
+        if (++this.frames === 4096) this.flush();
+      }
+      return true;
+    }
+  });
+}
+
+function stereoWav(chunks, sampleRate) {
+  const bytes = chunks.reduce((length, chunk) => length + chunk.byteLength, 0);
+  const header = new DataView(new ArrayBuffer(44));
+  const tag = (at, text) => {
+    for (let i = 0; i < text.length; i++) header.setUint8(at + i, text.charCodeAt(i));
+  };
+  tag(0, 'RIFF');
+  header.setUint32(4, bytes + 36, true);
+  tag(8, 'WAVE');
+  tag(12, 'fmt ');
+  header.setUint32(16, 16, true);
+  header.setUint16(20, 1, true);
+  header.setUint16(22, 2, true);
+  header.setUint32(24, sampleRate, true);
+  header.setUint32(28, sampleRate * 4, true);
+  header.setUint16(32, 4, true);
+  header.setUint16(34, 16, true);
+  tag(36, 'data');
+  header.setUint32(40, bytes, true);
+  return new Blob([header.buffer, ...chunks], { type: 'audio/wav' });
+}
+
+let capture;
+let captureContext;
+async function toggleAudioRecording() {
+  const button = $('recordAudio');
+  button.disabled = true;
+  if (capture) {
+    capture.port.postMessage('stop');
+    return;
+  }
+  try {
+    const engine = await startAudio();
+    const { ctx } = engine;
+    if (!ctx.audioWorklet || typeof AudioWorkletNode === 'undefined') {
+      status('Audio recording needs a browser with AudioWorklet support.');
+      return;
+    }
+    if (captureContext !== ctx) {
+      const source = new Blob(['(' + registerStereoCapture.toString() + ')();'], { type: 'text/javascript' });
+      const url = URL.createObjectURL(source);
+      try { await ctx.audioWorklet.addModule(url); }
+      finally { URL.revokeObjectURL(url); }
+      captureContext = ctx;
+    }
+    const node = new AudioWorkletNode(ctx, 'stereo-capture', {
+      channelCount: 2, channelCountMode: 'explicit'
+    });
+    const chunks = [];
+    const finish = () => {
+      engine.output.disconnect(node);
+      node.disconnect();
+      node.port.close();
+      capture = undefined;
+      button.disabled = false;
+      button.textContent = 'Record Audio';
+      pressed(button, false);
+    };
+    node.port.onmessage = ({ data }) => {
+      if (data.chunk) chunks.push(data.chunk);
+      if (!data.done) return;
+      finish();
+      if (!chunks.length) return;
+      const url = URL.createObjectURL(stereoWav(chunks, ctx.sampleRate));
+      const link = document.createElement('a');
+      link.href = url;
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      link.download = 'MIDI DIMI ' + timestamp + '.wav';
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 30000);
+    };
+    node.onprocessorerror = () => {
+      finish();
+      status('Audio recording stopped because the browser reported an error.');
+    };
+    engine.output.connect(node).connect(ctx.destination);
+    capture = node;
+    button.textContent = 'Stop Audio';
+    pressed(button, true);
+  } catch (error) {
+    status('Could not start audio recording.');
+    console.error(error);
+  } finally {
+    button.disabled = false;
   }
 }
 
@@ -1382,6 +1506,7 @@ function renderPattern() {
 
 $('play').onclick = transport;
 $('record').onclick = toggleRecord;
+$('recordAudio').onclick = toggleAudioRecording;
 $('keys').onclick = toggleKeys;
 $('previousSteps').onclick = () => moveStepBank(-1);
 $('nextSteps').onclick = () => moveStepBank(1);
