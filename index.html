@@ -35,6 +35,7 @@ button.primary:hover,button[aria-pressed=true]:hover {outline-color:#fff}
 input[type=number] {width:74px}
 label {display:inline-flex;align-items:center;gap:7px}
 .group {display:flex}
+.mixer-controls {display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .group button+button {border-left:0}
 .scroll {overflow:auto;padding:3px;margin:-3px}
 #mixer {display:grid;grid-template-columns:repeat(8,minmax(95px,1fr));min-width:760px;border:1px solid}
@@ -87,12 +88,17 @@ details p {max-width:78ch}
 <label>BPM <input id="tempo" type="number" min="40" max="220" value="128"></label>
 <label>Presets <select id="preset"><option value="blank">Blank</option><option value="techno">Techno</option><option value="hypnotic">Hypnotic</option><option value="ambient">Ambient</option></select></label>
 <button id="resetSession" type="button" title="Reset to a blank session">Reset</button>
-<button id="resetFX" type="button" title="Reset effects for all tracks">Reset FX</button>
 </section>
 <p id="status" role="status" hidden></p>
 <p id="playbackStatus" role="status" hidden></p>
 <section aria-label="Mixer">
-<div class="section-head"><h2>Mixer</h2><div id="pages" class="group" aria-label="Control page"><button data-page="0">Mix</button><button data-page="1">Sound</button><button data-page="2">Mod</button><button data-page="3" title="Envelope">Env</button></div></div>
+<div class="section-head">
+<h2>Mixer</h2>
+<div class="mixer-controls">
+<div id="pages" class="group" aria-label="Control page"><button data-page="0">Mix</button><button data-page="1">Sound</button><button data-page="2">Mod</button><button data-page="3" title="Envelope">Env</button></div>
+<button id="resetFX" type="button" aria-label="Reset effects" title="Reset effects for all tracks">Reset</button>
+</div>
+</div>
 <div class="scroll"><div id="mixer"></div></div>
 </section>
 <section aria-label="Pattern">
