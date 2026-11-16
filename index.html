@@ -439,9 +439,12 @@ class Audio {
   }
 }
 
+function pcmSample(value) {
+  return Math.round(Math.max(-1, Math.min(1, value)) * (value < 0 ? 32768 : 32767));
+}
+
 // Loaded from a Blob so the groovebox remains a single HTML file.
 function registerStereoCapture() {
-  const encode = value => Math.round(Math.max(-1, Math.min(1, value)) * (value < 0 ? 32768 : 32767));
   registerProcessor('stereo-capture', class extends AudioWorkletProcessor {
     constructor() {
       super();
@@ -466,8 +469,8 @@ function registerStereoCapture() {
       if (!left) return true;
       for (let i = 0; i < left.length; i++) {
         const offset = this.frames * 4;
-        this.buffer.setInt16(offset, encode(left[i]), true);
-        this.buffer.setInt16(offset + 2, encode(right[i]), true);
+        this.buffer.setInt16(offset, pcmSample(left[i]), true);
+        this.buffer.setInt16(offset + 2, pcmSample(right[i]), true);
         if (++this.frames === 4096) this.flush();
       }
       return true;
@@ -499,45 +502,52 @@ function stereoWav(chunks, sampleRate) {
 
 let capture;
 let captureContext;
-async function toggleAudioRecording() {
-  const button = $('recordAudio');
-  button.disabled = true;
-  if (capture) {
-    capture.port.postMessage('stop');
-    return;
-  }
+async function workletRecorder(ctx) {
+  if (!ctx.audioWorklet || typeof AudioWorkletNode === 'undefined') return null;
   try {
-    const engine = await startAudio();
-    const { ctx } = engine;
-    if (!ctx.audioWorklet || typeof AudioWorkletNode === 'undefined') {
-      status('Audio recording needs a browser with AudioWorklet support.');
-      return;
-    }
     if (captureContext !== ctx) {
-      const source = new Blob(['(' + registerStereoCapture.toString() + ')();'], { type: 'text/javascript' });
+      const source = new Blob([pcmSample.toString(), '\n(' + registerStereoCapture.toString() + ')();'], { type: 'text/javascript' });
       const url = URL.createObjectURL(source);
       try { await ctx.audioWorklet.addModule(url); }
       finally { URL.revokeObjectURL(url); }
       captureContext = ctx;
     }
-    const node = new AudioWorkletNode(ctx, 'stereo-capture', {
+    return new AudioWorkletNode(ctx, 'stereo-capture', {
       channelCount: 2, channelCountMode: 'explicit'
     });
+  } catch (error) {
+    console.info('AudioWorklet unavailable, trying direct audio capture.', error);
+    return null;
+  }
+}
+async function toggleAudioRecording() {
+  const button = $('recordAudio');
+  button.disabled = true;
+  if (capture) {
+    capture.stop();
+    return;
+  }
+  try {
+    const engine = await startAudio();
+    const { ctx } = engine;
+    const worklet = await workletRecorder(ctx);
+    const node = worklet || ctx.createScriptProcessor?.(4096, 2, 2);
+    if (!node) {
+      status('This browser cannot record audio. Open MIDI DIMI in desktop Chrome or Brave.');
+      return;
+    }
     const chunks = [];
-    const finish = () => {
+    const finish = (download = true) => {
+      if (!capture) return;
       engine.output.disconnect(node);
       node.disconnect();
-      node.port.close();
+      if (worklet) node.port.close();
+      else node.onaudioprocess = null;
       capture = undefined;
       button.disabled = false;
       button.textContent = 'Record Audio';
       pressed(button, false);
-    };
-    node.port.onmessage = ({ data }) => {
-      if (data.chunk) chunks.push(data.chunk);
-      if (!data.done) return;
-      finish();
-      if (!chunks.length) return;
+      if (!download || !chunks.length) return;
       const url = URL.createObjectURL(stereoWav(chunks, ctx.sampleRate));
       const link = document.createElement('a');
       link.href = url;
@@ -546,16 +556,34 @@ async function toggleAudioRecording() {
       link.click();
       setTimeout(() => URL.revokeObjectURL(url), 30000);
     };
-    node.onprocessorerror = () => {
-      finish();
-      status('Audio recording stopped because the browser reported an error.');
-    };
+    if (worklet) {
+      node.port.onmessage = ({ data }) => {
+        if (data.chunk) chunks.push(data.chunk);
+        if (data.done) finish();
+      };
+      node.onprocessorerror = () => {
+        finish(false);
+        status('Audio recording stopped because the browser reported an error.');
+      };
+    } else {
+      node.onaudioprocess = ({ inputBuffer }) => {
+        const left = inputBuffer.getChannelData(0);
+        const right = inputBuffer.numberOfChannels > 1 ? inputBuffer.getChannelData(1) : left;
+        const chunk = new DataView(new ArrayBuffer(left.length * 4));
+        for (let i = 0; i < left.length; i++) {
+          chunk.setInt16(i * 4, pcmSample(left[i]), true);
+          chunk.setInt16(i * 4 + 2, pcmSample(right[i]), true);
+        }
+        chunks.push(chunk.buffer);
+      };
+    }
+    if ($('status').textContent.startsWith('Could not start audio recording')) status('');
     engine.output.connect(node).connect(ctx.destination);
-    capture = node;
+    capture = { stop: worklet ? () => node.port.postMessage('stop') : finish };
     button.textContent = 'Stop Audio';
     pressed(button, true);
   } catch (error) {
-    status('Could not start audio recording.');
+    status('Could not start audio recording. Try opening MIDI DIMI in desktop Chrome or Brave.');
     console.error(error);
   } finally {
     button.disabled = false;
