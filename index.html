@@ -87,6 +87,7 @@ details p {max-width:78ch}
 <label>BPM <input id="tempo" type="number" min="40" max="220" value="128"></label>
 <label>Presets <select id="preset"><option value="blank">Blank</option><option value="techno">Techno</option><option value="hypnotic">Hypnotic</option><option value="ambient">Ambient</option></select></label>
 <button id="resetSession" type="button" title="Reset to a blank session">Reset</button>
+<button id="resetFX" type="button" title="Reset effects for all tracks">Reset FX</button>
 </section>
 <p id="status" role="status" hidden></p>
 <p id="playbackStatus" role="status" hidden></p>
@@ -795,6 +796,8 @@ function hypnoticSession(tracks) {
   ];
 }
 
+const defaultEffects = { cutoff: .5, delay: 0, reverb: 0, resonance: 0, character: 0, depth: 0 };
+
 function session(preset) {
   const ambient = preset === 'ambient';
   const hypnotic = preset === 'hypnotic';
@@ -809,9 +812,7 @@ function session(preset) {
     depth: i === 4 ? .24 : i >= 6 ? .36 : 0
   }));
   if (preset === 'blank') {
-    tracks.forEach(track => Object.assign(track, {
-      length: 1, cutoff: .5, delay: 0, reverb: 0, resonance: 0, character: 0, depth: 0
-    }));
+    tracks.forEach(track => Object.assign(track, defaultEffects, { length: 1 }));
     return { preset, tempo: 128, tracks };
   }
   let pattern;
@@ -1338,6 +1339,13 @@ $('preset').onchange = () => choosePreset($('preset').value);
 $('resetSession').onclick = () => {
   $('preset').value = 'blank';
   choosePreset('blank');
+};
+$('resetFX').onclick = () => {
+  state.tracks.forEach(track => Object.assign(track, defaultEffects));
+  audio?.resetEffects();
+  updateAudio();
+  renderMixer();
+  save();
 };
 $('length').onchange = () => {
   state.tracks[selected].length = +$('length').value;
