@@ -1,12 +1,14 @@
 # MIDI DIMI
 
-MIDI DIMI is an eight-track browser groovebox for making techno and ambient loops. It has built-in drums, synths, effects, and a step sequencer. Play on screen or connect a Novation Launch Control XL over USB.
+MIDI DIMI is an eight-track browser groovebox by [Dimitar Vuksanov](https://github.com/vuxanov) for making techno and ambient loops. It has built-in drums, synths, effects, and a step sequencer. Play on screen or connect a Novation Launch Control XL over USB.
 
 ## Play
 
 1. Open [MIDI DIMI](https://vuxanov.github.io/MIDI-DIMI/). Select **Techno**, **Hypnotic**, or **Ambient** under **Presets**, or start with **Blank**.
 2. Click **Play**. Select a track and click its grid slots to add or remove hits.
 3. Turn on **Keys** to play the selected instrument. Turn on **Record** to add what you play to the loop.
+
+Use **Record Audio** and **Stop Audio** to download your live mix as a stereo WAV.
 
 ## Launch Control XL
 
