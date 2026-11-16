@@ -810,7 +810,7 @@ function session(preset) {
   }));
   if (preset === 'blank') {
     tracks.forEach(track => Object.assign(track, {
-      length: 1, cutoff: 1, delay: 0, reverb: 0, resonance: 0, character: 0, depth: 0
+      length: 1, cutoff: .5, delay: 0, reverb: 0, resonance: 0, character: 0, depth: 0
     }));
     return { preset, tempo: 128, tracks };
   }
