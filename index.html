@@ -328,13 +328,16 @@ class Audio {
     const drum = index < 4;
     const texture = index === 7;
     const peak = voiceLevels[index] * velocity / Math.sqrt(notes.length);
-    const attack = attackTime(track.attack, index);
+    const pad = index === 6;
+    const configuredAttack = attackTime(track.attack, index);
+    const attack = pad && gate !== null ? Math.min(configuredAttack, gate * .72) : configuredAttack;
     const hold = drum ? holdTime(track.sustain) : 0;
     const release = releaseTime(track.release, index);
     const decay = .025 + track.decay ** 2 * (drum ? 1.15 : 2.4);
     const sustain = Math.max(.00012, peak * (drum ? .035 : track.sustain));
     amp.gain.setValueAtTime(.0001, time);
-    amp.gain.exponentialRampToValueAtTime(peak, time + attack);
+    if (pad) amp.gain.linearRampToValueAtTime(peak, time + attack);
+    else amp.gain.exponentialRampToValueAtTime(peak, time + attack);
     if (hold) amp.gain.setValueAtTime(peak, time + attack + hold);
     amp.gain.exponentialRampToValueAtTime(sustain, time + attack + hold + decay);
     if (drum) {
@@ -400,11 +403,13 @@ class Audio {
             amp.gain.cancelAndHoldAtTime(end);
           } else {
             const elapsed = end - time;
+            const progress = elapsed / attack;
             const level = elapsed < attack
-              ? .0001 * (peak / .0001) ** (elapsed / attack)
+              ? (pad ? .0001 + (peak - .0001) * progress : .0001 * (peak / .0001) ** progress)
               : peak * (sustain / peak) ** clamp((elapsed - attack - hold) / decay, 0, 1);
             amp.gain.cancelScheduledValues(end);
-            amp.gain.setValueAtTime(level, end);
+            if (pad && elapsed < attack) amp.gain.linearRampToValueAtTime(level, end);
+            else amp.gain.setValueAtTime(level, end);
           }
           amp.gain.setTargetAtTime(.0001, end, hard ? .003 : release / 5);
         }
