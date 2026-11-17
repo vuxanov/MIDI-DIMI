@@ -16,6 +16,11 @@ Use a desktop browser with Web MIDI support, such as Chrome. Plug in the control
 
 The upper row selects tracks. The lower row toggles eight steps at a time or plays notes in Keys mode. Track arrows move through step groups or change octaves. Faders set track levels. Send Select or Page buttons cycle through **Mix**, **Sound**, **Mod**, and **Env** for effects, modulation, and envelopes.
 
+## Phone and tablet
+
+- **iPhone and iPad** — For a hardware MIDI controller, open [MIDI DIMI](https://vuxanov.github.io/MIDI-DIMI/) in a Web MIDI app such as [Web MIDI Browser](https://apps.apple.com/app/web-midi-browser/id953846217). Connect the controller, then tap **Connect MIDI**. If button lights are missing, open **MIDI mapping & shortcuts**, choose the controller under **LED output**, and tap **Test lights**.
+- **Android** — Chrome for Android supports [Web MIDI](https://developer.chrome.com/blog/web-midi-permission-prompt). Open the HTTPS app link in Chrome, connect the controller, and allow MIDI access when prompted. MIDI DIMI has not been tested with an Android controller setup.
+
 ## Run locally
 
 Open `index.html` in your browser. If your browser blocks MIDI for local files, serve the folder with `python3 -m http.server 8765 --bind 127.0.0.1` and open `http://localhost:8765`.
