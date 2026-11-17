@@ -83,34 +83,39 @@ details p {max-width:78ch}
 @media (orientation: landscape) and (max-height: 500px) and (max-width: 1000px) {
   :root {font-size:12px;-webkit-text-size-adjust:100%}
   main {
-    padding:6px max(8px,env(safe-area-inset-right))
-      max(6px,env(safe-area-inset-bottom)) max(8px,env(safe-area-inset-left));
+    padding:8px calc(12px + env(safe-area-inset-right))
+      calc(8px + env(safe-area-inset-bottom)) calc(12px + env(safe-area-inset-left));
   }
   header,.section-head,.transport,.header-controls,.mixer-controls,.pattern-toolbar {gap:5px}
-  header {padding-bottom:4px;border-width:1px}
-  h1 {font-size:24px}
+  .top-controls {display:flex;align-items:center;justify-content:space-between;gap:5px;flex-wrap:wrap;padding-bottom:5px;border-bottom:1px solid}
+  .top-controls header {display:contents}
+  .top-controls h1 {position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+  .top-controls .transport {margin:0}
+  .top-controls .header-controls {order:1}
+  .top-controls button {padding-inline:4px}
+  .top-controls select {padding-right:22px;background-position:right 11px center,right 6px center}
   section {margin-top:6px}
   .section-head {margin-bottom:4px}
   button,select,input[type=number] {min-height:25px;padding-block:1px}
   label {gap:4px}
   select,input[type=number] {font-size:16px}
-  input[type=number] {width:60px}
+  input[type=number] {width:51px}
   section[aria-label="Mixer"] .section-head {justify-content:flex-end}
   section[aria-label="Mixer"] h2,#patternTitle,#editor {display:none}
   #mixer {grid-template-columns:repeat(8,minmax(0,1fr));min-width:0}
-  .channel {min-width:0;gap:2px;padding:3px}
-  .knob {grid-template-columns:18px minmax(0,1fr);align-items:center;justify-self:stretch;gap:3px;text-align:left;font-size:9px}
-  .dial {width:18px;height:18px}
-  .dial::after {left:7px;top:2px;height:5px;transform-origin:50% 6px}
-  .fader {height:34px;margin-block:0}
-  .track {min-height:23px;font-size:11px}
+  .channel {min-width:0;gap:4px;padding:5px clamp(5px,1vw,8px)}
+  .knob {grid-template-columns:20px minmax(0,1fr);align-items:center;justify-self:stretch;gap:4px;text-align:left;font-size:clamp(8px,1.05vw,10px)}
+  .dial {width:20px;height:20px}
+  .dial::after {left:8px;top:2px;height:6px;transform-origin:50% 7px}
+  .fader {height:42px;margin-block:0}
+  .track {min-height:27px;font-size:11px}
   #soundField {margin-right:auto}
   #soundField label {font-size:0;gap:0}
   #keyboard {margin-bottom:5px}
-  .piano-key {min-height:25px;padding:2px 0}
-  #steps {gap:5px}
+  .piano-key {min-height:29px;padding:2px 0}
+  #steps {gap:7px}
   .pattern-bar {gap:6px}
-  .step {min-height:23px}
+  .step {min-height:29px}
   .step-mark {width:8px;height:8px}
   details {margin-top:6px;padding-block:4px}
 }
@@ -118,6 +123,7 @@ details p {max-width:78ch}
 </head>
 <body>
 <main>
+<div class="top-controls">
 <header><h1>MIDI DIMI</h1><div class="header-controls"><button id="recordAudio" type="button" aria-pressed="false">Record Audio</button><button id="midi">Connect MIDI</button></div></header>
 <section class="transport" aria-label="Transport">
 <button id="play" class="primary">▶ Play</button><button id="record" aria-pressed="false">● Record</button>
@@ -125,6 +131,7 @@ details p {max-width:78ch}
 <label>Presets <select id="preset"><option value="blank">Blank</option><option value="techno">Techno</option><option value="hypnotic">Hypnotic</option><option value="ambient">Ambient</option></select></label>
 <button id="resetSession" type="button" title="Reset to a blank session">Reset</button>
 </section>
+</div>
 <p id="status" role="status" hidden></p>
 <p id="playbackStatus" role="status" hidden></p>
 <section aria-label="Mixer">
