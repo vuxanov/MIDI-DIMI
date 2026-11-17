@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>MIDI DIMI</title>
 <meta name="description" content="MIDI DIMI is a browser groovebox by Dimitar Vuksanov for techno and ambient loops, with a step sequencer, Web MIDI, and Launch Control XL support.">
 <meta name="author" content="Dimitar Vuksanov">
@@ -79,6 +79,41 @@ button:active {background:#000;color:#fff}
 #editor:not(:empty) {margin-top:8px}
 details {margin-top:14px;padding:8px 0;border-top:1px solid;font-size:12px}
 details p {max-width:78ch}
+
+@media (orientation: landscape) and (max-height: 500px) and (max-width: 1000px) {
+  :root {font-size:12px;-webkit-text-size-adjust:100%}
+  main {
+    padding:6px max(8px,env(safe-area-inset-right))
+      max(6px,env(safe-area-inset-bottom)) max(8px,env(safe-area-inset-left));
+  }
+  header,.section-head,.transport,.header-controls,.mixer-controls,.pattern-toolbar {gap:5px}
+  header {padding-bottom:4px;border-width:1px}
+  h1 {font-size:24px}
+  section {margin-top:6px}
+  .section-head {margin-bottom:4px}
+  button,select,input[type=number] {min-height:25px;padding-block:1px}
+  label {gap:4px}
+  select,input[type=number] {font-size:16px}
+  input[type=number] {width:60px}
+  section[aria-label="Mixer"] .section-head {justify-content:flex-end}
+  section[aria-label="Mixer"] h2,#patternTitle,#editor {display:none}
+  #mixer {grid-template-columns:repeat(8,minmax(0,1fr));min-width:0}
+  .channel {min-width:0;gap:2px;padding:3px}
+  .knob {grid-template-columns:18px minmax(0,1fr);align-items:center;justify-self:stretch;gap:3px;text-align:left;font-size:9px}
+  .dial {width:18px;height:18px}
+  .dial::after {left:7px;top:2px;height:5px;transform-origin:50% 6px}
+  .fader {height:34px;margin-block:0}
+  .track {min-height:23px;font-size:11px}
+  #soundField {margin-right:auto}
+  #soundField label {font-size:0;gap:0}
+  #keyboard {margin-bottom:5px}
+  .piano-key {min-height:25px;padding:2px 0}
+  #steps {gap:5px}
+  .pattern-bar {gap:6px}
+  .step {min-height:23px}
+  .step-mark {width:8px;height:8px}
+  details {margin-top:6px;padding-block:4px}
+}
 </style>
 </head>
 <body>
@@ -1478,7 +1513,7 @@ function renderSteps() {
       chosen = index;
       bank = Math.floor(index / 8);
       renderPattern();
-      stepButtons[index].focus();
+      stepButtons[index].focus({ preventScroll: true });
     };
     const element = button('', event => {
       if (event?.shiftKey && selected >= 4 && step) {
@@ -1486,7 +1521,7 @@ function renderSteps() {
         return;
       }
       toggleStep(index);
-      stepButtons[index].focus();
+      stepButtons[index].focus({ preventScroll: true });
     }, 'step');
     if (selected >= 4 && step) {
       element.title = 'Shift-click or right-click to edit this note';
