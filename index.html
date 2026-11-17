@@ -118,7 +118,7 @@ details p {max-width:78ch}
 <details id="setup"><summary>MIDI mapping &amp; shortcuts</summary>
 <p>MK1/MK2: select Factory template 1. XL 3: use the DAW input. Connect MIDI activates its DAW mode. If you use a custom mode, MIDI Learn can pick up the MIDI messages it sends. In Keys mode, configure custom buttons to send momentary messages.</p>
 <p id="midiActivity">No MIDI messages received.</p>
-<div class="setup-controls"><button id="testLED" type="button" disabled>Test lights</button><label>Input <select id="port"></select></label><label>Profile <select id="profile"><option value="legacy">XL MK1 / MK2</option><option value="xl3">XL 3</option></select></label><label>Control <select id="learnTarget"></select></label><button id="learn">Learn</button><button id="resetMap">Reset learned</button></div>
+<div class="setup-controls"><button id="testLED" type="button" disabled>Test lights</button><label>Input <select id="port"></select></label><label>LED output <select id="ledOutput"><option value="">Auto</option></select></label><label>Profile <select id="profile"><option value="legacy">XL MK1 / MK2</option><option value="xl3">XL 3</option></select></label><label>Control <select id="learnTarget"></select></label><button id="learn">Learn</button><button id="resetMap">Reset learned</button></div>
 <p>Upper MIDI buttons select tracks. Lower buttons edit eight steps or play notes in Keys mode. Track arrows move through the pattern eight steps at a time or shift the octave in Keys mode. Space plays or stops. A S D F G H J K mirror the lower row. Your session and learned controls save in this browser.</p></details>
 </main>
 <script type="module">
@@ -607,8 +607,10 @@ function mapGroup(map, type, numbers, action, row = 0) {
 const legacy = {};
 mapGroup(legacy, 176, interval(77), 'fader');
 [13,29,49].forEach((start, row) => mapGroup(legacy, 176, interval(start), 'knob', row));
-mapGroup(legacy, 144, [41,42,43,44,57,58,59,60], 'select');
-mapGroup(legacy, 144, [73,74,75,76,89,90,91,92], 'lower');
+const legacyUpperButtons = [41,42,43,44,57,58,59,60];
+const legacyLowerButtons = [73,74,75,76,89,90,91,92];
+mapGroup(legacy, 144, legacyUpperButtons, 'select');
+mapGroup(legacy, 144, legacyLowerButtons, 'lower');
 Object.assign(legacy, { '176:104': 'pageDown', '176:105': 'pageUp',
   '176:106': 'previous', '176:107': 'next', '144:105': 'shift',
   '144:106': 'keys', '144:107': 'record' });
@@ -627,6 +629,7 @@ function setupMIDI(actions) {
   const button = document.getElementById('midi');
   const port = document.getElementById('port');
   const profile = document.getElementById('profile');
+  const ledOutput = document.getElementById('ledOutput');
   const target = document.getElementById('learnTarget');
   const learn = document.getElementById('learn');
   const reset = document.getElementById('resetMap');
@@ -634,8 +637,11 @@ function setupMIDI(actions) {
   const ledTest = document.getElementById('testLED');
   target.replaceChildren(...Object.entries(controls).map(([id, label]) => new Option(label, id)));
   let access, active, output, selectedId, learning = false, shifted = false, attached = false, legacyChannel = 8;
+  let selectedOutput = '';
+  let binding = 0;
   let dawLEDs = false;
   let legacyTemplate = 8;
+  let legacyTemplateReported = false;
   const sent = new Map();
   let learned = {};
   try { learned = JSON.parse(localStorage.getItem('dimi-midi-v1')) || {}; } catch {}
@@ -644,6 +650,7 @@ function setupMIDI(actions) {
     try { localStorage.setItem('dimi-midi-v1', JSON.stringify(learned)); } catch {}
   }
   function detach() {
+    binding++;
     if (active) active.onmidimessage = null;
     ledTest.disabled = true;
     try {
@@ -664,6 +671,7 @@ function setupMIDI(actions) {
     const [status, number, value] = event.data;
     if (status === 240 && event.data.length === 9 && [0, 32, 41, 2, 17, 119].every((byte, i) => event.data[i + 1] === byte)) {
       legacyTemplate = event.data[7];
+      legacyTemplateReported = true;
       sent.clear();
       feedback();
       return;
@@ -680,7 +688,7 @@ function setupMIDI(actions) {
     const baseKey = type + ':' + number;
     if (profile.value === 'legacy' && legacy[baseKey] && channel !== legacyChannel) {
       legacyChannel = channel;
-      if (!access.sysexEnabled) legacyTemplate = channel;
+      if (!legacyTemplateReported) legacyTemplate = channel;
       sent.clear();
       feedback();
     }
@@ -713,8 +721,15 @@ function setupMIDI(actions) {
     }
     const key = 'midi-' + customKey;
     if (!on) {
+      if (kind === 'lower' || kind === 'select') {
+        const numbers = kind === 'lower' ? legacyLowerButtons : legacyUpperButtons;
+        const led = modern ? (kind === 'lower' ? 45 : 37) + Number(index) : numbers[index];
+        sent.delete((modern ? 176 : 144 + legacyChannel) * 128 + led);
+        sent.delete('buttons');
+      }
       actions.releasePad(key);
       if (action === 'shift') shifted = false;
+      feedback();
       return;
     }
     if (action === 'shift') shifted = true;
@@ -731,39 +746,53 @@ function setupMIDI(actions) {
     }
   }
   async function refresh() {
-    const ports = [...access.inputs.values()].filter(input => input.state === 'connected');
+    const ports = Array.from(access.inputs?.values() || []).filter(input => input.state !== 'disconnected');
+    const outputs = Array.from(access.outputs?.values() || []).filter(candidate => candidate.state !== 'disconnected');
     port.replaceChildren(new Option('Choose MIDI input', ''), ...ports.map(input => new Option(input.name || input.id, input.id)));
-    if (!selectedId) {
+    ledOutput.replaceChildren(new Option('Auto', ''), ...outputs.map(candidate => new Option(candidate.name || candidate.id, candidate.id)));
+    ledOutput.value = outputs.some(candidate => candidate.id === selectedOutput) ? selectedOutput : '';
+    if (!ports.some(candidate => candidate.id === selectedId)) {
       const novation = ports.filter(input => /launch control|lcxl/i.test(input.name || '') && !/hui/i.test(input.name || ''));
       selectedId = (novation.find(input => /daw/i.test(input.name)) || novation[0] || (ports.length === 1 && ports[0]))?.id;
     }
     const input = ports.find(candidate => candidate.id === selectedId);
     port.value = input?.id || '';
-    if (input && input === active) return;
-    detach();
     if (!input) {
+      detach();
       button.textContent = 'Cancel MIDI';
       actions.status(ports.length ? 'Choose an input under MIDI mapping.' : 'Connect your Launch Control XL over USB.');
       return;
     }
+    const modern = input === active ? profile.value === 'xl3' : /xl\s*3|lcxl3|daw/i.test(input.name || '');
+    const portName = name => (name || '').replace(/\b(?:midi|input|output|in|out)\b/gi, '').replace(/[^a-z0-9]/gi, '').toLowerCase();
+    const name = portName(input.name);
+    const compatible = outputs.filter(candidate => !/hui/i.test(candidate.name || ''));
+    const matchingModel = compatible.filter(candidate =>
+      /launch control|lcxl/i.test(candidate.name || '') && /daw/i.test(candidate.name || '') === /daw/i.test(input.name || ''));
+    const connectedOutput = (selectedOutput && outputs.find(candidate => candidate.id === selectedOutput))
+      || (name && compatible.find(candidate => portName(candidate.name) === name))
+      || (matchingModel.length === 1 && matchingModel[0])
+      || (compatible.length === 1 && compatible[0])
+      || undefined;
+    const enableDAW = Boolean(modern && connectedOutput && (
+      /daw/i.test(input.name || '') || /daw/i.test(connectedOutput.name || '') || selectedOutput
+    ));
+    if (input === active && connectedOutput === output && enableDAW === dawLEDs) return;
+    detach();
+    const revision = binding;
     active = input;
-    profile.value = /xl\s*3|lcxl3|daw/i.test(input.name || '') ? 'xl3' : 'legacy';
-    const modern = profile.value === 'xl3';
-    const outputs = [...access.outputs.values()].filter(candidate => candidate.state === 'connected');
-    const portName = name => (name || '').replace(/\b(?:in|out)\b/gi, '').replace(/[^a-z0-9]/gi, '').toLowerCase();
-    output = outputs.find(candidate => portName(candidate.name) === portName(input.name));
-    if (!output && /launch control|lcxl/i.test(input.name || '')) {
-      const matches = outputs.filter(candidate =>
-        /launch control|lcxl/i.test(candidate.name || '') && /daw/i.test(candidate.name) === /daw/i.test(input.name));
-      if (matches.length === 1) output = matches[0];
-    }
-    dawLEDs = Boolean(modern && output && /daw/i.test(input.name));
-    const connectedOutput = output;
+    output = connectedOutput;
+    profile.value = modern ? 'xl3' : 'legacy';
+    dawLEDs = enableDAW;
+    legacyChannel = 8;
+    legacyTemplate = 8;
+    legacyTemplateReported = false;
     try {
       await input.open?.();
-      if (active !== input) return;
+      if (binding !== revision) return;
       input.onmidimessage = receive;
     } catch (error) {
+      if (binding !== revision) return;
       detach();
       button.textContent = 'Cancel MIDI';
       actions.status('Could not open MIDI input. Unplug and reconnect the controller, then retry.');
@@ -772,23 +801,22 @@ function setupMIDI(actions) {
     }
     try {
       await connectedOutput?.open?.();
-      if (active !== input) return;
+      if (binding !== revision) return;
       if (dawLEDs) {
         connectedOutput.send([159, 12, 127]);
         connectedOutput.send([182, 71, 127]);
       }
     } catch (error) {
+      if (binding !== revision) return;
       output = undefined;
       dawLEDs = false;
       console.error(error);
     }
-    if (active !== input) return;
-    legacyChannel = 8;
-    legacyTemplate = 8;
+    if (binding !== revision) return;
     ledTest.disabled = !output || (modern && !dawLEDs);
     feedback();
     button.textContent = 'Disconnect MIDI';
-    actions.status(output ? '' : 'LED output unavailable');
+    actions.status(output ? '' : 'Choose LED output under MIDI mapping.');
   }
 
   button.onclick = async () => {
@@ -797,6 +825,7 @@ function setupMIDI(actions) {
       access.onstatechange = null;
       detach();
       port.replaceChildren(new Option('Disconnected', ''));
+      ledOutput.replaceChildren(new Option('Auto', ''));
       button.textContent = 'Connect MIDI';
       actions.status('');
       return;
@@ -831,6 +860,10 @@ function setupMIDI(actions) {
     selectedId = port.value;
     if (access && attached) refresh();
   };
+  ledOutput.onchange = () => {
+    selectedOutput = ledOutput.value;
+    if (access && attached) refresh();
+  };
   ledTest.onclick = () => {
     if (!output) return;
     const testOutput = output;
@@ -851,10 +884,11 @@ function setupMIDI(actions) {
       console.error(error);
     }
   };
-  profile.onchange = () => {
+  profile.onchange = async () => {
     shifted = false;
     sent.clear();
     actions.releaseAll();
+    if (access && attached) await refresh();
     feedback();
   };
   learn.onclick = () => {
@@ -884,14 +918,18 @@ function setupMIDI(actions) {
         console.warn('MIDI LED output unavailable', error);
       }
     };
-    const upper = modern ? interval(37) : [41,42,43,44,57,58,59,60];
-    const lower = modern ? interval(45) : [73,74,75,76,89,90,91,92];
+    const buttonLEDs = [];
+    const upper = modern ? interval(37) : legacyUpperButtons;
+    const lower = modern ? interval(45) : legacyLowerButtons;
     for (let i = 0; i < 8; i++) {
       const movingFader = state.touched?.row === -1 && state.touched.index === i;
-      send(modern ? 176 : 144 + legacyChannel, upper[i], modern
-        ? (movingFader ? 21 : state.selected === i ? 3 : 1)
-        : (movingFader ? 60 : state.selected === i ? 63 : 13));
-      send(modern ? 176 : 144 + legacyChannel, lower[i], modern ? (state.steps[i] ? 21 : 0) : (state.steps[i] ? 60 : 12));
+      const upperColor = modern ? (movingFader ? 21 : state.selected === i ? 3 : 1)
+        : (movingFader ? 60 : state.selected === i ? 63 : 13);
+      const lowerColor = modern ? (state.steps[i] ? 21 : 0) : (state.steps[i] ? 60 : 12);
+      const command = modern ? 176 : 144 + legacyChannel;
+      send(command, upper[i], upperColor);
+      send(command, lower[i], lowerColor);
+      if (!modern && access.sysexEnabled) buttonLEDs.push(24 + i, upperColor, 32 + i, lowerColor);
     }
     const knobLEDs = [];
     for (let row = 0; row < 3; row++) {
@@ -906,14 +944,15 @@ function setupMIDI(actions) {
         }
       }
     }
-    if (knobLEDs.length) {
-      const signature = knobLEDs.join(',');
-      if (sent.get('knobs') !== signature) {
+    for (const [type, leds] of [['knobs', knobLEDs], ['buttons', buttonLEDs]]) {
+      if (!leds.length) continue;
+      const signature = leds.join(',');
+      if (sent.get(type) !== signature) {
         try {
-          output.send([240, 0, 32, 41, 2, 17, 120, legacyTemplate, ...knobLEDs, 247]);
-          sent.set('knobs', signature);
+          output.send([240, 0, 32, 41, 2, 17, 120, legacyTemplate, ...leds, 247]);
+          sent.set(type, signature);
         } catch (error) {
-          console.warn('Could not update Launch Control XL knob LEDs', error);
+          console.warn('Could not update Launch Control XL LEDs', error);
         }
       }
     }
