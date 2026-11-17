@@ -7,7 +7,8 @@
 <meta name="description" content="MIDI DIMI is a browser groovebox by Dimitar Vuksanov for techno and ambient loops, with a step sequencer, Web MIDI, and Launch Control XL support.">
 <meta name="author" content="Dimitar Vuksanov">
 <style>
-:root { color-scheme: light; font: 14px ui-monospace,monospace; color:#000; background:#fff; }
+:root { --ink:#000; --paper:#fff; color-scheme: light; font: 14px ui-monospace,monospace; color:var(--ink); background:var(--paper); }
+:root[data-theme="dark"] {--ink:#fff;--paper:#000;color-scheme:dark}
 * {box-sizing:border-box}
 body {margin:0}
 main {max-width:1240px;margin:auto;padding:24px clamp(12px,4vw,48px)}
@@ -18,37 +19,38 @@ h1 {font-size:clamp(32px,6vw,64px);letter-spacing:-.085em;line-height:1;margin:0
 h2 {font-size:16px;letter-spacing:-.04em;margin:0}
 section {margin-top:16px}
 .section-head {margin-bottom:8px}
-button,input,select {font:inherit;color:inherit;background:#fff}
-button,select,input[type=number] {min-height:30px;border:1px solid #000;padding:3px 8px;border-radius:0}
+button,input,select {font:inherit;color:inherit;background:var(--paper)}
+button,select,input[type=number] {min-height:30px;border:1px solid var(--ink);padding:3px 8px;border-radius:0}
 select {
   appearance:none;
   padding-right:27px;
-  background-image:linear-gradient(45deg,transparent 48%,#000 50%),linear-gradient(135deg,#000 50%,transparent 52%);
+  background-image:linear-gradient(45deg,transparent 48%,var(--ink) 50%),linear-gradient(135deg,var(--ink) 50%,transparent 52%);
   background-position:right 13px center,right 8px center;
   background-size:5px 5px;
   background-repeat:no-repeat;
 }
 button,select,summary {cursor:pointer}
 button:hover {outline:1px solid;outline-offset:-3px}
-:focus-visible {outline:2px dashed #000;outline-offset:3px}
-button.primary,button[aria-pressed=true] {background:#000;color:#fff}
-button.primary:hover,button[aria-pressed=true]:hover {outline-color:#fff}
+:focus-visible {outline:2px dashed var(--ink);outline-offset:3px}
+button.primary,button[aria-pressed=true] {background:var(--ink);color:var(--paper)}
+button.primary:hover,button[aria-pressed=true]:hover {outline-color:var(--paper)}
 input[type=number] {width:74px}
 label {display:inline-flex;align-items:center;gap:7px}
 .group {display:flex}
 .header-controls,.mixer-controls {display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+#themeToggle {width:30px;padding-inline:0;font-size:17px;line-height:1}
 .group button+button {border-left:0}
 .scroll {overflow:auto;padding:3px;margin:-3px}
 #mixer {display:grid;grid-template-columns:repeat(8,minmax(95px,1fr));min-width:760px;border:1px solid}
 .channel {display:grid;justify-items:center;gap:6px;padding:6px;text-align:center}
 .channel+.channel {border-left:1px solid}
 .track {width:100%;white-space:nowrap;padding-inline:2px;font-weight:600}
-.dial {position:relative;width:28px;height:28px;border:1px solid #000;border-radius:50%;display:block;margin:auto}
-.dial::after {content:"";position:absolute;left:12px;top:3px;width:2px;height:8px;background:#000;transform:rotate(var(--angle));transform-origin:50% 10px;pointer-events:none}
+.dial {position:relative;width:28px;height:28px;border:1px solid var(--ink);border-radius:50%;display:block;margin:auto}
+.dial::after {content:"";position:absolute;left:12px;top:3px;width:2px;height:8px;background:var(--ink);transform:rotate(var(--angle));transform-origin:50% 10px;pointer-events:none}
 .dial input {position:absolute;inset:0;width:100%;height:100%;margin:0;opacity:0;cursor:ns-resize;touch-action:none}
 .dial:focus-within {outline:2px dashed;outline-offset:2px}
 .knob {display:grid;gap:3px;font-size:11px;white-space:nowrap}
-.fader {writing-mode:vertical-lr;direction:rtl;width:24px;height:60px;accent-color:#000}
+.fader {writing-mode:vertical-lr;direction:rtl;width:24px;height:60px;accent-color:var(--ink)}
 #keyboard {display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:3px;margin-bottom:8px}
 #keyboard[hidden] {display:none}
 .piano-key {display:flex;align-items:center;justify-content:center;min-height:38px;min-width:0;padding:8px 0;touch-action:none}
@@ -56,26 +58,26 @@ label {display:inline-flex;align-items:center;gap:7px}
 .pattern-toolbar {display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .pattern-toolbar h2 {margin-right:auto}
 #soundField {display:inline-flex}
-.dial:has(input.touched),.dial:has(input:active) {background:#000}
-.dial:has(input.touched)::after,.dial:has(input:active)::after {background:#fff}
-.fader.touched,.fader:active {outline:1px solid #000;outline-offset:2px}
-button:active {background:#000;color:#fff}
-#steps {display:grid;gap:10px}
+.dial:has(input.touched),.dial:has(input:active) {background:var(--ink)}
+.dial:has(input.touched)::after,.dial:has(input:active)::after {background:var(--paper)}
+.fader.touched,.fader:active {outline:1px solid var(--ink);outline-offset:2px}
+button:active {background:var(--ink);color:var(--paper)}
+#steps {display:grid;gap:10px;padding:1px}
 .pattern-bar {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-items:center;gap:8px}
 .step-bank {display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:3px}
-.step-bank.current {outline:1px dashed #000;outline-offset:2px}
+.step-bank.current {outline:3px dashed var(--ink);outline-offset:1px}
 @media (max-width:540px) {
   .pattern-bar {gap:5px}
   .step-bank {gap:2px}
   .step-bank .step {font-size:9px;overflow:hidden}
 }
 .step {min-height:31px;padding:0;font-size:12px}
-.step[aria-pressed=true] {background:#000;color:#fff}
+.step[aria-pressed=true] {background:var(--ink);color:var(--paper)}
 .step-mark {display:inline-block;width:10px;height:10px;border:1px solid;border-radius:50%}
-.step[aria-pressed=true] .step-mark {background:#fff}
+.step[aria-pressed=true] .step-mark {background:var(--paper)}
 .step:nth-child(4n+1) {border-left-width:3px}
 .step.cursor {outline:2px solid;outline-offset:1px}
-.step.chosen {box-shadow:inset 0 0 0 2px #fff}
+.step.chosen {box-shadow:inset 0 0 0 2px var(--paper)}
 #editor:not(:empty) {margin-top:8px}
 details {margin-top:14px;padding:8px 0;border-top:1px solid;font-size:12px}
 details p {max-width:78ch}
@@ -92,8 +94,11 @@ details p {max-width:78ch}
   .top-controls header {display:contents}
   .top-controls h1 {position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
   .top-controls .transport {margin:0}
-  .top-controls .header-controls {order:1}
-  .top-controls button {padding-inline:4px}
+  .top-controls .header-controls {order:1;gap:4px}
+  .top-controls button {padding-inline:4px;font-size:clamp(10px,1.5vw,12px)}
+  .top-controls #themeToggle {width:23px}
+  .top-controls #tempo {width:46px}
+  .top-controls #preset {max-width:100px}
   .top-controls select {padding-right:22px;background-position:right 11px center,right 6px center}
   section {margin-top:6px}
   .section-head {margin-bottom:4px}
@@ -110,7 +115,7 @@ details p {max-width:78ch}
   .knob {grid-template-columns:20px minmax(0,1fr);align-items:center;justify-self:stretch;gap:4px;text-align:left;font-size:clamp(8px,1.05vw,10px)}
   .dial {width:20px;height:20px}
   .dial::after {left:8px;top:2px;height:6px;transform-origin:50% 7px}
-  .fader {height:100%;min-height:42px;margin-block:0}
+  .fader {height:0;min-height:100%;margin-block:0}
   .track {min-height:27px;font-size:11px}
   #soundField {margin-right:auto}
   #soundField label {font-size:0;gap:0}
@@ -126,7 +131,7 @@ details p {max-width:78ch}
 <body>
 <main>
 <div class="top-controls">
-<header><h1>MIDI DIMI</h1><div class="header-controls"><button id="recordAudio" type="button" aria-pressed="false">Record Audio</button><button id="midi">Connect MIDI</button></div></header>
+<header><h1>MIDI DIMI</h1><div class="header-controls"><button id="recordAudio" type="button" aria-pressed="false">Record Audio</button><button id="midi">Connect MIDI</button><button id="themeToggle" type="button" aria-label="Dark mode" aria-pressed="false" title="Switch to dark mode">☾</button></div></header>
 <section class="transport" aria-label="Transport">
 <button id="play" class="primary">▶ Play</button><button id="record" aria-pressed="false">● Record</button>
 <label>BPM <input id="tempo" type="number" min="40" max="220" value="128"></label>
@@ -1628,6 +1633,22 @@ function renderPattern() {
   renderSteps();
   renderEditor();
 }
+
+function applyTheme(dark) {
+  document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+  const button = $('themeToggle');
+  pressed(button, dark);
+  button.textContent = dark ? '☀︎' : '☾';
+  button.title = dark ? 'Switch to light mode' : 'Switch to dark mode';
+}
+let darkMode = false;
+try { darkMode = localStorage.getItem('dimi-theme') === 'dark'; } catch {}
+applyTheme(darkMode);
+$('themeToggle').onclick = () => {
+  darkMode = !darkMode;
+  applyTheme(darkMode);
+  try { localStorage.setItem('dimi-theme', darkMode ? 'dark' : 'light'); } catch {}
+};
 
 $('play').onclick = transport;
 $('record').onclick = toggleRecord;
