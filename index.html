@@ -1254,6 +1254,18 @@ function choosePreset(name) {
     applyPreset(name);
   }
 }
+function revealChannel(index) {
+  if (!window.matchMedia?.('(max-width: 600px) and (orientation: portrait)').matches) return;
+  const mixer = $('mixer');
+  const viewport = mixer.parentElement;
+  if (viewport.scrollWidth <= viewport.clientWidth) return;
+  const channel = mixer.children[index].getBoundingClientRect();
+  const left = viewport.getBoundingClientRect().left + viewport.clientLeft + 3;
+  const right = left + viewport.clientWidth - 6;
+  if (channel.left < left) viewport.scrollLeft -= left - channel.left;
+  else if (channel.right > right) viewport.scrollLeft += channel.right - right;
+}
+
 function touchControl(row, index) {
   const name = row === -1 ? 'volume' : pages[page][row];
   touchedInput?.classList.remove('touched');
@@ -1280,6 +1292,7 @@ function setParam(index, name, value) {
 function selectTrack(index) {
   releaseAll();
   selected = index;
+  revealChannel(index);
   chosen = 0;
   bank = 0;
   updateMixer();
@@ -1679,11 +1692,15 @@ updateLights = setupMIDI({
   unlockAudio: () => startAudio().catch(console.error),
   page: delta => { setPage(page + delta); renderEditor(); },
   stepBank: moveStepBank,
-  touch: touchControl,
+  touch: (row, index) => {
+    revealChannel(index);
+    touchControl(row, index);
+  },
   continuous: (type, index, row, raw, relative) => {
     const name = type === 'fader' ? 'volume' : pages[page][row];
     const value = relative ? clamp(state.tracks[index][name] + (raw - 64) / 100, 0, 1) : raw / 127;
     setParam(index, name, value);
+    revealChannel(index);
     touchControl(type === 'fader' ? -1 : row, index);
     const input = $('mixer').children[index].querySelector(`[data-param=${name}]`);
     if (name === 'volume') input.value = value;
