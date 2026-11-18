@@ -11,6 +11,10 @@
 :root[data-theme="dark"] {--ink:#fff;--paper:#000;color-scheme:dark}
 * {box-sizing:border-box}
 body {margin:0}
+dialog {max-width:min(360px,calc(100vw - 32px));padding:20px;border:1px solid var(--ink);color:var(--ink);background:var(--paper)}
+dialog::backdrop {background:rgba(0,0,0,.65)}
+dialog p {margin:0 0 16px}
+.dialog-actions {display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap}
 main {max-width:1240px;margin:auto;padding:24px clamp(12px,4vw,48px)}
 header,.section-head,.transport,.mode,.setup-controls,#editor {display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 header,.section-head {justify-content:space-between}
@@ -192,6 +196,16 @@ details p {max-width:78ch}
 <div class="setup-controls"><button id="testLED" type="button" disabled>Test lights</button><label>Input <select id="port"></select></label><label>LED output <select id="ledOutput"><option value="">Auto</option></select></label><label>Profile <select id="profile"><option value="legacy">XL MK1 / MK2</option><option value="xl3">XL 3</option></select></label><label>Control <select id="learnTarget"></select></label><button id="learn">Learn</button><button id="resetMap">Reset learned</button></div>
 <p>Upper MIDI buttons select tracks. Lower buttons edit eight steps or play notes in Keys mode. Track arrows move through the pattern eight steps at a time or shift the octave in Keys mode. Space plays or stops. A S D F G H J K mirror the lower row. Your session and learned controls save in this browser.</p></details>
 </main>
+<dialog id="deleteDialog" aria-labelledby="deleteTitle" aria-describedby="deleteDescription">
+<form method="dialog">
+<p id="deleteTitle">Delete everything?</p>
+<p id="deleteDescription">All notes and hits on every track will be deleted. This cannot be undone.</p>
+<div class="dialog-actions">
+<button value="cancel" autofocus>Cancel</button>
+<button id="confirmDelete" value="delete" class="primary">Delete everything</button>
+</div>
+</form>
+</dialog>
 <script type="module">
 const tau = Math.PI * 2;
 const hz = note => 440 * 2 ** ((note - 69) / 12);
@@ -1783,7 +1797,10 @@ $('tempo').onchange = () => {
   save();
 };
 $('resetBars').onclick = () => {
-  if (!window.confirm('Delete all notes and hits from every track? This cannot be undone.')) return;
+  $('optionsMenu').open = false;
+  $('deleteDialog').showModal();
+};
+$('confirmDelete').onclick = () => {
   releaseAll();
   state.tracks.forEach(track => track.steps.fill(null));
   audio?.stopSequence();
