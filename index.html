@@ -40,7 +40,13 @@ input[type=number] {width:74px}
 label {display:inline-flex;align-items:center;gap:7px}
 .group {display:flex}
 .header-controls,.mixer-controls {display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-#themeToggle {width:30px;padding-inline:0;font-size:17px;line-height:1}
+.overflow {position:relative;margin:0;padding:0;border:0;font-size:inherit}
+.overflow summary {list-style:none;display:flex;align-items:center;justify-content:center;width:30px;min-height:30px;border:1px solid}
+.overflow summary::-webkit-details-marker {display:none}
+.overflow-panel {position:absolute;right:0;top:calc(100% + 5px);z-index:10;display:grid;gap:4px;min-width:185px;padding:6px;border:1px solid;background:var(--paper)}
+.overflow:not([open]) .overflow-panel {display:none}
+.overflow-panel button {text-align:left;white-space:nowrap}
+.key-icon {display:inline-block;width:16px;height:12px;border:1px solid currentColor;vertical-align:-1px;margin-right:5px;background:linear-gradient(90deg,transparent 24%,currentColor 24%,currentColor 30%,transparent 30%,transparent 57%,currentColor 57%,currentColor 63%,transparent 63%)}
 .group button+button {border-left:0}
 .scroll {overflow:auto;padding:3px;margin:-3px}
 #mixer {display:grid;grid-template-columns:repeat(8,minmax(95px,1fr));min-width:760px;border:1px solid}
@@ -101,7 +107,7 @@ details p {max-width:78ch}
   .top-controls h1 {font-size:20px;white-space:nowrap}
   .top-controls .header-controls {order:1;gap:4px}
   .top-controls button {padding-inline:4px;font-size:clamp(10px,1.5vw,12px)}
-  .top-controls #themeToggle {width:23px}
+  .top-controls .overflow summary {width:25px;min-height:25px}
   .top-controls #tempo {width:46px}
   .top-controls select {padding-right:22px;background-position:right 11px center,right 6px center}
   section {margin-top:6px}
@@ -142,9 +148,16 @@ details p {max-width:78ch}
 <div class="header-controls">
 <button id="play" class="primary">▶ Play</button>
 <label>BPM <input id="tempo" type="number" min="40" max="220" value="128"></label>
-<button id="recordAudio" type="button" aria-pressed="false">Record Audio</button>
+<button id="recordAudio" type="button" aria-pressed="false">● Record Audio</button>
 <button id="midi">Connect MIDI</button>
-<button id="themeToggle" type="button" aria-label="Dark mode" aria-pressed="false" title="Switch to dark mode">☾</button>
+<details id="optionsMenu" class="overflow">
+<summary aria-label="Options" title="Options">⋯</summary>
+<div class="overflow-panel">
+<button id="resetBars" type="button">Clear all patterns</button>
+<button id="resetFX" type="button">Reset all effects</button>
+<button id="themeToggle" type="button" aria-pressed="false">☾ Dark mode</button>
+</div>
+</details>
 </div>
 </header>
 </div>
@@ -152,7 +165,7 @@ details p {max-width:78ch}
 <p id="playbackStatus" role="status" hidden></p>
 <section aria-label="Mixer">
 <div class="section-head">
-<div class="section-label"><h2>Mixer</h2><button id="resetFX" type="button" aria-label="Reset effects" title="Reset effects for all tracks">Reset</button></div>
+<div class="section-label"><h2>Mixer</h2></div>
 <div class="mixer-controls">
 <div id="pages" class="group" aria-label="Control page"><button data-page="0">Mix</button><button data-page="1">Sound</button><button data-page="2">Mod</button><button data-page="3" title="Envelope">Env</button><button data-page="4">Note</button></div>
 </div>
@@ -161,13 +174,13 @@ details p {max-width:78ch}
 </section>
 <section aria-label="Pattern">
 <div class="section-head pattern-toolbar">
-<div class="section-label"><h2 id="patternTitle">Pattern</h2><button id="resetBars" type="button" aria-label="Clear selected track pattern" title="Clear this track’s pattern">Reset</button></div>
+<div class="section-label"><h2 id="patternTitle">Pattern</h2></div>
 <div id="soundField"></div>
 <select id="length" aria-label="Pattern length"><option value="1">1 bar</option><option value="2">2 bars</option><option value="4">4 bars</option></select>
 <output id="octave" aria-live="polite" hidden></output>
 <div class="group"><button id="previousSteps" aria-label="Previous eight steps">←</button><button id="nextSteps" aria-label="Next eight steps">→</button></div>
 <button id="record" aria-pressed="false">● Record</button>
-<button id="keys" aria-pressed="false" title="Switch bottom buttons between steps and live notes">Keys</button>
+<button id="keys" aria-pressed="false" title="Switch bottom buttons between steps and live notes"><span class="key-icon" aria-hidden="true"></span>Keys</button>
 </div>
 <div id="keyboard" aria-label="Playable keys" hidden></div>
 <div id="editor"></div>
@@ -618,7 +631,7 @@ async function toggleAudioRecording() {
       else node.onaudioprocess = null;
       capture = undefined;
       button.disabled = false;
-      button.textContent = 'Record Audio';
+      button.textContent = '● Record Audio';
       pressed(button, false);
       if (!download || !chunks.length) return;
       const url = URL.createObjectURL(stereoWav(chunks, ctx.sampleRate));
@@ -653,7 +666,7 @@ async function toggleAudioRecording() {
     if ($('status').textContent.startsWith('Could not start audio recording')) status('');
     engine.output.connect(node).connect(ctx.destination);
     capture = { stop: worklet ? () => node.port.postMessage('stop') : finish };
-    button.textContent = 'Stop Audio';
+    button.textContent = '■ Stop Audio';
     pressed(button, true);
   } catch (error) {
     status('Could not start audio recording. Try opening MIDI DIMI in desktop Chrome or Brave.');
@@ -1730,17 +1743,31 @@ function applyTheme(dark) {
   document.documentElement.dataset.theme = dark ? 'dark' : 'light';
   const button = $('themeToggle');
   pressed(button, dark);
-  button.textContent = dark ? '☀︎' : '☾';
+  button.textContent = dark ? '☀︎ Light mode' : '☾ Dark mode';
   button.title = dark ? 'Switch to light mode' : 'Switch to dark mode';
 }
 let darkMode = false;
 try { darkMode = localStorage.getItem('dimi-theme') === 'dark'; } catch {}
 applyTheme(darkMode);
 $('themeToggle').onclick = () => {
+  $('optionsMenu').open = false;
   darkMode = !darkMode;
   applyTheme(darkMode);
   try { localStorage.setItem('dimi-theme', darkMode ? 'dark' : 'light'); } catch {}
 };
+
+document.addEventListener('pointerdown', event => {
+  if (!$('optionsMenu').contains(event.target)) $('optionsMenu').open = false;
+});
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape') {
+    const menu = $('optionsMenu');
+    if (menu.open) {
+      menu.open = false;
+      menu.querySelector('summary').focus();
+    }
+  }
+});
 
 $('play').onclick = transport;
 $('record').onclick = toggleRecord;
@@ -1757,13 +1784,16 @@ $('tempo').onchange = () => {
 };
 $('resetBars').onclick = () => {
   releaseAll();
-  state.tracks[selected].steps.fill(null);
+  state.tracks.forEach(track => track.steps.fill(null));
+  audio?.stopSequence();
+  $('optionsMenu').open = false;
   chosen = 0;
   bank = 0;
   renderPattern();
   save();
 };
 $('resetFX').onclick = () => {
+  $('optionsMenu').open = false;
   state.tracks.forEach(track => Object.assign(track, defaultEffects));
   audio?.resetEffects();
   updateAudio();
