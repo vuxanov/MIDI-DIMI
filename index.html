@@ -166,7 +166,7 @@ details p {max-width:78ch}
 <summary aria-label="Options" title="Options">⋯</summary>
 <div class="overflow-panel">
 <button id="themeToggle" type="button" aria-pressed="false">☾ Dark mode</button>
-<button id="resetActiveFX" type="button">Reset active effects</button>
+<button id="resetActiveFX" type="button">Reset active instrument</button>
 <button id="resetFX" type="button">Reset all effects</button>
 <button id="resetBars" type="button">× Delete everything</button>
 </div>
@@ -1824,9 +1824,19 @@ $('confirmDelete').onclick = () => {
 };
 $('resetActiveFX').onclick = () => {
   $('optionsMenu').open = false;
-  Object.assign(state.tracks[selected], defaultEffects);
+  releaseAll();
+  const track = state.tracks[selected];
+  const defaults = session('blank').tracks[selected];
+  const steps = track.steps.map(step => step ? {
+    notes: [roots[selected]], gate: 1, velocity: .82
+  } : null);
+  state.tracks[selected] = {
+    ...defaults, length: track.length, steps, octave: 0,
+    notePitch: roots[selected], noteGate: 1, noteVelocity: .82
+  };
   audio?.update(selected, state.tracks[selected], state.tempo);
   renderMixer();
+  renderPattern();
   save();
 };
 $('resetFX').onclick = () => {
