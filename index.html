@@ -794,7 +794,7 @@ function setupMIDI(actions) {
     const channel = status & 15;
     const customKey = type + ':' + channel + ':' + number;
     const baseKey = type + ':' + number;
-    if (profile.value === 'legacy' && /^(knob|fader|select|lower)-/.test(legacy[baseKey] || '') && channel !== legacyChannel) {
+    if (profile.value === 'legacy' && legacy[baseKey] && channel !== legacyChannel) {
       legacyChannel = channel;
       if (!legacyTemplateReported) legacyTemplate = channel;
       sent.clear();
@@ -851,10 +851,6 @@ function setupMIDI(actions) {
       ({ play: actions.transport, record: actions.toggleRecord, keys: actions.toggleKeys,
         pageUp: () => actions.page(1), pageDown: () => actions.page(-1),
         previous: () => actions.stepBank(-1), next: () => actions.stepBank(1) })[action]?.();
-      if (action === 'previous' || action === 'next') {
-        sent.clear();
-        feedback();
-      }
     }
   }
   async function refresh() {
@@ -914,7 +910,6 @@ function setupMIDI(actions) {
     try {
       await connectedOutput?.open?.();
       if (binding !== revision) return;
-      if (!modern && connectedOutput) connectedOutput.send([176 + legacyChannel, 0, 32]);
       if (dawLEDs) {
         connectedOutput.send([159, 12, 127]);
         connectedOutput.send([182, 71, 127]);
@@ -1040,10 +1035,8 @@ function setupMIDI(actions) {
         : (movingFader ? 60 : state.selected === i ? 63 : 13);
       const lowerColor = modern ? (state.steps[i] ? 21 : 0) : (state.steps[i] ? 60 : 12);
       const command = modern ? 176 : 144 + legacyChannel;
-      if (modern || !access.sysexEnabled) {
-        send(command, upper[i], upperColor);
-        send(command, lower[i], lowerColor);
-      }
+      send(command, upper[i], upperColor);
+      send(command, lower[i], lowerColor);
       if (!modern && access.sysexEnabled) buttonLEDs.push(24 + i, upperColor, 32 + i, lowerColor);
     }
     const knobLEDs = [];
