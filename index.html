@@ -15,7 +15,7 @@ main {max-width:1240px;margin:auto;padding:24px clamp(12px,4vw,48px)}
 header,.section-head,.transport,.mode,.setup-controls,#editor {display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 header,.section-head {justify-content:space-between}
 header {padding:0 0 12px;border-bottom:2px solid}
-h1 {font-size:clamp(32px,6vw,64px);letter-spacing:-.085em;line-height:1;margin:0;font-weight:700}
+h1 {font-size:clamp(24px,3vw,36px);letter-spacing:-.085em;line-height:1;margin:0;font-weight:700}
 h2 {font-size:16px;letter-spacing:-.04em;margin:0}
 section {margin-top:16px}
 .section-head {margin-bottom:8px}
@@ -97,9 +97,8 @@ details p {max-width:78ch}
   }
   header,.section-head,.transport,.header-controls,.mixer-controls,.pattern-toolbar {gap:5px}
   .top-controls {display:flex;align-items:center;justify-content:space-between;gap:5px;flex-wrap:wrap;padding-bottom:5px;border-bottom:1px solid}
-  .top-controls header {display:contents}
-  .top-controls h1 {position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
-  .top-controls .transport {margin:0}
+  .top-controls header {display:flex;width:100%;padding:0;border:0}
+  .top-controls h1 {font-size:20px;white-space:nowrap}
   .top-controls .header-controls {order:1;gap:4px}
   .top-controls button {padding-inline:4px;font-size:clamp(10px,1.5vw,12px)}
   .top-controls #themeToggle {width:23px}
@@ -138,11 +137,16 @@ details p {max-width:78ch}
 <body>
 <main>
 <div class="top-controls">
-<header><h1>MIDI DIMI</h1><div class="header-controls"><button id="recordAudio" type="button" aria-pressed="false">Record Audio</button><button id="midi">Connect MIDI</button><button id="themeToggle" type="button" aria-label="Dark mode" aria-pressed="false" title="Switch to dark mode">☾</button></div></header>
-<section class="transport" aria-label="Transport">
-<button id="play" class="primary">▶ Play</button><button id="record" aria-pressed="false">● Record</button>
+<header>
+<h1>MIDI DIMI</h1>
+<div class="header-controls">
+<button id="play" class="primary">▶ Play</button>
 <label>BPM <input id="tempo" type="number" min="40" max="220" value="128"></label>
-</section>
+<button id="recordAudio" type="button" aria-pressed="false">Record Audio</button>
+<button id="midi">Connect MIDI</button>
+<button id="themeToggle" type="button" aria-label="Dark mode" aria-pressed="false" title="Switch to dark mode">☾</button>
+</div>
+</header>
 </div>
 <p id="status" role="status" hidden></p>
 <p id="playbackStatus" role="status" hidden></p>
@@ -162,6 +166,7 @@ details p {max-width:78ch}
 <select id="length" aria-label="Pattern length"><option value="1">1 bar</option><option value="2">2 bars</option><option value="4">4 bars</option></select>
 <output id="octave" aria-live="polite" hidden></output>
 <div class="group"><button id="previousSteps" aria-label="Previous eight steps">←</button><button id="nextSteps" aria-label="Next eight steps">→</button></div>
+<button id="record" aria-pressed="false">● Record</button>
 <button id="keys" aria-pressed="false" title="Switch bottom buttons between steps and live notes">Keys</button>
 </div>
 <div id="keyboard" aria-label="Playable keys" hidden></div>
