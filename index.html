@@ -216,14 +216,17 @@ class Audio {
     const ctx = this.ctx;
     const master = ctx.createGain();
     master.gain.value = 1;
-    const compressor = ctx.createDynamicsCompressor();
-    compressor.threshold.value = -12;
-    compressor.knee.value = 10;
-    compressor.ratio.value = 10;
-    compressor.attack.value = .003;
-    compressor.release.value = .12;
-    master.connect(compressor).connect(ctx.destination);
-    this.output = compressor;
+    const limiter = ctx.createWaveShaper();
+    // A fixed soft knee limits peaks without gain reduction carrying into later hits.
+    limiter.curve = Float32Array.from({ length: 8193 }, (_, index) => {
+      const input = index / 4096 - 1;
+      const magnitude = Math.abs(input);
+      return magnitude <= .7 ? input
+        : Math.sign(input) * (.7 + .28 * Math.tanh((magnitude - .7) / .28));
+    });
+    limiter.oversample = '2x';
+    master.connect(limiter).connect(ctx.destination);
+    this.output = limiter;
     this.master = master;
     this.reverbImpulse = this.buffer(4.6, (t, d) =>
       (Math.random() * 2 - 1) * (1 - t / d) ** 2.9 * Math.min(1, t / .018), 2);
