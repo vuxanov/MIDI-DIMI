@@ -80,7 +80,6 @@ label {display:inline-flex;align-items:center;gap:7px}
 .pattern-toolbar {display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .section-label {display:flex;align-items:center;gap:8px}
 .pattern-toolbar .section-label {margin-right:auto}
-#soundField {display:inline-flex}
 .dial:has(input.touched),.dial:has(input:active) {background:var(--ink)}
 .dial:has(input.touched)::after,.dial:has(input:active)::after {background:var(--paper)}
 .fader.touched,.fader:active {outline:1px solid var(--ink);outline-offset:2px}
@@ -141,8 +140,6 @@ details p {max-width:78ch}
   .dial::after {left:8px;top:2px;height:6px;transform-origin:50% 7px}
   .fader {height:0;min-height:100%;margin-block:0}
   .track {min-height:27px;font-size:11px}
-  #soundField {margin-right:auto}
-  #soundField label {font-size:0;gap:0}
   #keyboard {margin-bottom:5px}
   .piano-key {min-height:29px;padding:2px 0}
   #steps {gap:7px}
@@ -187,7 +184,6 @@ details p {max-width:78ch}
 <section aria-label="Pattern">
 <div class="section-head pattern-toolbar">
 <div class="section-label"><h2 id="patternTitle">Pattern</h2></div>
-<div id="soundField"></div>
 <select id="length" aria-label="Pattern length"><option value="1">1 bar</option><option value="2">2 bars</option><option value="4">4 bars</option></select>
 <output id="octave" aria-live="polite" hidden></output>
 <div class="group"><button id="previousSteps" aria-label="Previous eight steps">←</button><button id="nextSteps" aria-label="Next eight steps">→</button></div>
@@ -1730,34 +1726,12 @@ function renderSteps() {
   $('steps').replaceChildren(...bars);
 }
 
-function field(name, control, container = $('editor')) {
-  const label = document.createElement('label');
-  label.append(name, control);
-  container.append(label);
-}
-function selectField(name, values, current, change, container) {
-  const control = document.createElement('select');
-  control.replaceChildren(...values.map((value, i) => new Option(value, i)));
-  control.value = current;
-  control.onchange = () => change(+control.value);
-  field(name, control, container);
-}
-function renderEditor() {
-  const track = state.tracks[selected];
-  $('editor').replaceChildren();
-  $('soundField').replaceChildren();
-  $('soundField').hidden = page === 4;
-  if (page !== 4) selectField('Sound', patches[selected], track.patch, value =>
-    setParam(selected, 'patch', value / (patches[selected].length - 1)), $('soundField'));
-
-}
 function renderPattern() {
   $('patternTitle').textContent = names[selected];
   $('length').value = state.tracks[selected].length;
   updateMixer();
   playbackStatus();
   renderSteps();
-  renderEditor();
   if (page === 4) {
     for (const [index, column] of [...$('mixer').children].entries()) {
       for (const name of trackControls(index)) dialValue(column.querySelector(`[data-param=${name}]`), index, name);
@@ -1857,8 +1831,7 @@ $('length').onchange = () => {
 $('pages').onclick = event => {
   if (event.target.dataset.page !== undefined) {
     setPage(+event.target.dataset.page);
-    renderEditor();
-  }
+    }
 };
 const keyboard = ['KeyA', 'KeyS', 'KeyD', 'KeyF', 'KeyG', 'KeyH', 'KeyJ', 'KeyK'];
 window.addEventListener('keydown', event => {
@@ -1884,7 +1857,7 @@ updateLights = setupMIDI({
   }),
   status, releaseAll, releasePad, lower, selectTrack, transport, toggleRecord, toggleKeys,
   unlockAudio: () => startAudio().catch(console.error),
-  page: delta => { setPage(page + delta); renderEditor(); },
+  page: delta => { setPage(page + delta); },
   stepBank: delta => {
     moveStepBank(delta);
   },
