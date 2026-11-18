@@ -753,7 +753,7 @@ function setupMIDI(actions) {
     const channel = status & 15;
     const customKey = type + ':' + channel + ':' + number;
     const baseKey = type + ':' + number;
-    if (profile.value === 'legacy' && legacy[baseKey] && channel !== legacyChannel) {
+    if (profile.value === 'legacy' && /^(knob|fader|select|lower)-/.test(legacy[baseKey] || '') && channel !== legacyChannel) {
       legacyChannel = channel;
       if (!legacyTemplateReported) legacyTemplate = channel;
       sent.clear();
@@ -810,6 +810,10 @@ function setupMIDI(actions) {
       ({ play: actions.transport, record: actions.toggleRecord, keys: actions.toggleKeys,
         pageUp: () => actions.page(1), pageDown: () => actions.page(-1),
         previous: () => actions.stepBank(-1), next: () => actions.stepBank(1) })[action]?.();
+      if (action === 'previous' || action === 'next') {
+        sent.clear();
+        feedback();
+      }
     }
   }
   async function refresh() {
@@ -869,6 +873,7 @@ function setupMIDI(actions) {
     try {
       await connectedOutput?.open?.();
       if (binding !== revision) return;
+      if (!modern && connectedOutput) connectedOutput.send([176 + legacyChannel, 0, 32]);
       if (dawLEDs) {
         connectedOutput.send([159, 12, 127]);
         connectedOutput.send([182, 71, 127]);
@@ -994,8 +999,10 @@ function setupMIDI(actions) {
         : (movingFader ? 60 : state.selected === i ? 63 : 13);
       const lowerColor = modern ? (state.steps[i] ? 21 : 0) : (state.steps[i] ? 60 : 12);
       const command = modern ? 176 : 144 + legacyChannel;
-      send(command, upper[i], upperColor);
-      send(command, lower[i], lowerColor);
+      if (modern || !access.sysexEnabled) {
+        send(command, upper[i], upperColor);
+        send(command, lower[i], lowerColor);
+      }
       if (!modern && access.sysexEnabled) buttonLEDs.push(24 + i, upperColor, 32 + i, lowerColor);
     }
     const knobLEDs = [];
@@ -1043,7 +1050,7 @@ const pages = [
   ['rate', 'depth', 'cutoff'], ['attack', 'sustain', 'release'], ['pitch', 'duration', 'patch']
 ];
 function trackControls(index) {
-  if (index < 4 && page === 1) return ['tuning', 'decay', 'character'];
+  if (index < 4 && [1, 2, 3].includes(page)) return ['tuning', 'decay', 'character'];
   if (index < 4 && page === 4) return ['pitch', 'velocity', 'patch'];
   return pages[page];
 }
@@ -1486,14 +1493,13 @@ function dialValue(input, index, name) {
   if (name === 'release') display = releaseTime(value, index).toFixed(2) + ' s';
   if (name === 'tuning') display = (Math.round((value - .5) * 24) >= 0 ? '+' : '') + Math.round((value - .5) * 24) + ' st';
   if (name === 'decay' && index < 4) display = Math.round(drumDecayTime(value, index) * 1000) + ' ms';
-  if (index < 4 && (page === 2 || page === 3)) display = '—';
   if (name === 'pitch') display = noteName(noteStep(index)?.notes[0] ?? state.tracks[index].notePitch ?? roots[index]);
   if (name === 'duration') display = (noteStep(index)?.gate ?? state.tracks[index].noteGate ?? 1) + ' steps';
   if (name === 'patch') display = patches[index][state.tracks[index].patch];
   input.title = display;
   input.setAttribute('aria-valuetext', display);
   const caption = input.parentElement.nextElementSibling;
-  caption.textContent = index < 4 && (page === 2 || page === 3) ? '—' : name === 'cutoff'
+  caption.textContent = name === 'cutoff'
     ? 'Cutoff ' + (state.tracks[index].filterType === 'highpass' ? 'HP' : 'LP')
     : page === 4 ? display : parameterLabel(name, index);
   if (name === 'cutoff') {
@@ -1517,7 +1523,6 @@ function renderMixer() {
       const input = Object.assign(document.createElement('input'), {
         type: 'range', min: 0, max: 1, step: .001
       });
-      input.disabled = index < 4 && (page === 2 || page === 3);
       input.dataset.param = name;
       input.setAttribute('aria-label', names[index] + ' ' + (parameterLabel(name, index)));
       ring.append(input);
@@ -1788,18 +1793,19 @@ updateLights = setupMIDI({
   lights: () => ({
     selected, playing, recording, touched,
     steps: keys ? Array.from({ length: 8 }, (_, i) => [...held.values()].some(note => note.i === i))
-      : state.tracks[selected].steps.slice(bank * 8, bank * 8 + 8)
+      : state.tracks[selected].steps.slice(bank * 8, bank * 8 + 8).map(Boolean)
   }),
   status, releaseAll, releasePad, lower, selectTrack, transport, toggleRecord, toggleKeys,
   unlockAudio: () => startAudio().catch(console.error),
   page: delta => { setPage(page + delta); renderEditor(); },
-  stepBank: moveStepBank,
+  stepBank: delta => {
+    moveStepBank(delta);
+  },
   touch: (row, index) => {
     revealChannel(index);
     touchControl(row, index);
   },
   continuous: (type, index, row, raw, relative) => {
-    if (type !== 'fader' && index < 4 && (page === 2 || page === 3)) return;
     const name = type === 'fader' ? 'volume' : trackControls(index)[row];
     const value = relative ? clamp(parameterValue(index, name) + (raw - 64) / 100, 0, 1) : raw / 127;
     setParam(index, name, value);
