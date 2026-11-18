@@ -756,13 +756,18 @@ function setupMIDI(actions) {
     clearTimeout(navigationLEDTimer);
     // Navigation can trigger a local LED update in the controller/bridge.
     // Repaint after it settles, reading the latest bank rather than a captured one.
-    sent.clear();
+    invalidateButtonLEDs();
     feedback();
     navigationLEDTimer = setTimeout(() => {
       if (!output) return;
-      sent.clear();
+      invalidateButtonLEDs();
       feedback();
     }, 80);
+  }
+  function invalidateButtonLEDs() {
+    sent.delete('buttons');
+    for (const number of [...legacyUpperButtons, ...legacyLowerButtons]) sent.delete((144 + legacyChannel) * 128 + number);
+    for (let number = 37; number <= 52; number++) sent.delete(176 * 128 + number);
   }
   let learned = {};
   try { learned = JSON.parse(localStorage.getItem('dimi-midi-v1')) || {}; } catch {}
@@ -1052,10 +1057,10 @@ function setupMIDI(actions) {
         : (movingFader ? 60 : state.selected === i ? 63 : 13);
       const lowerColor = modern ? (state.steps[i] ? 21 : 0) : (state.steps[i] ? 60 : 12);
       const command = modern ? 176 : 144 + legacyChannel;
-      if (modern || !access.sysexEnabled) {
-        send(command, upper[i], upperColor);
-        send(command, lower[i], lowerColor);
-      }
+      // Always send ordinary button feedback as well. Some mobile MIDI bridges
+      // report SysEx permission while silently dropping the outgoing packets.
+      send(command, upper[i], upperColor);
+      send(command, lower[i], lowerColor);
       if (!modern && access.sysexEnabled) buttonLEDs.push(24 + i, upperColor, 32 + i, lowerColor);
     }
     const knobLEDs = [];
@@ -1067,7 +1072,7 @@ function setupMIDI(actions) {
         } else if (access.sysexEnabled) {
           knobLEDs.push(index, 28);
         } else {
-          send(176 + legacyChannel, [13, 29, 49][row] + i, 28);
+          send(144 + legacyChannel, [13, 29, 49][row] + i, 28);
         }
       }
     }
