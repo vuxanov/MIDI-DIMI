@@ -50,7 +50,14 @@ label {display:inline-flex;align-items:center;gap:7px}
 .overflow-panel {position:absolute;right:0;top:calc(100% + 5px);z-index:10;display:grid;gap:4px;min-width:185px;padding:6px;border:1px solid;background:var(--paper)}
 .overflow:not([open]) .overflow-panel {display:none}
 .overflow-panel button {text-align:left;white-space:nowrap}
-.key-icon {display:inline-block;width:16px;height:12px;border:1px solid currentColor;vertical-align:-1px;margin-right:5px;background:linear-gradient(90deg,transparent 24%,currentColor 24%,currentColor 30%,transparent 30%,transparent 57%,currentColor 57%,currentColor 63%,transparent 63%)}
+#keys,#record,#recordAudio {display:inline-flex;align-items:center;justify-content:center;gap:7px}
+.record-icon {display:block;flex:0 0 8px;width:8px;height:8px;border-radius:50%;background:currentColor}
+.record-icon.stop {border-radius:0}
+.key-icon {display:block;flex:0 0 19px;width:19px;height:14px;border:2px solid currentColor;border-radius:2px;background:
+  linear-gradient(currentColor,currentColor) 4px 0/3px 7px no-repeat,
+  linear-gradient(currentColor,currentColor) 10px 0/3px 7px no-repeat,
+  linear-gradient(currentColor,currentColor) 5px 0/1px 100% no-repeat,
+  linear-gradient(currentColor,currentColor) 11px 0/1px 100% no-repeat}
 .group button+button {border-left:0}
 .scroll {overflow:auto;padding:3px;margin:-3px}
 #mixer {display:grid;grid-template-columns:repeat(8,minmax(95px,1fr));min-width:760px;border:1px solid}
@@ -153,7 +160,7 @@ details p {max-width:78ch}
 <div class="header-controls">
 <button id="play" class="primary">▶ Play</button>
 <label>BPM <input id="tempo" type="number" min="40" max="220" value="128"></label>
-<button id="recordAudio" type="button" aria-pressed="false">● Record Audio</button>
+<button id="recordAudio" type="button" aria-pressed="false"><span class="record-icon" aria-hidden="true"></span><span>Record Audio</span></button>
 <button id="midi">Connect MIDI</button>
 <details id="optionsMenu" class="overflow">
 <summary aria-label="Options" title="Options">⋯</summary>
@@ -183,7 +190,7 @@ details p {max-width:78ch}
 <select id="length" aria-label="Pattern length"><option value="1">1 bar</option><option value="2">2 bars</option><option value="4">4 bars</option></select>
 <output id="octave" aria-live="polite" hidden></output>
 <div class="group"><button id="previousSteps" aria-label="Previous eight steps">←</button><button id="nextSteps" aria-label="Next eight steps">→</button></div>
-<button id="record" aria-pressed="false">● Record</button>
+<button id="record" aria-pressed="false"><span class="record-icon" aria-hidden="true"></span><span>Record</span></button>
 <button id="keys" aria-pressed="false" title="Switch bottom buttons between steps and live notes"><span class="key-icon" aria-hidden="true"></span>Keys</button>
 </div>
 <div id="keyboard" aria-label="Playable keys" hidden></div>
@@ -620,6 +627,10 @@ async function workletRecorder(ctx) {
     return null;
   }
 }
+function audioRecordLabel(button, recording) {
+  button.querySelector('.record-icon').classList.toggle('stop', recording);
+  button.querySelector('span:last-child').textContent = recording ? 'Stop Audio' : 'Record Audio';
+}
 async function toggleAudioRecording() {
   const button = $('recordAudio');
   button.disabled = true;
@@ -645,7 +656,7 @@ async function toggleAudioRecording() {
       else node.onaudioprocess = null;
       capture = undefined;
       button.disabled = false;
-      button.textContent = '● Record Audio';
+      audioRecordLabel(button, false);
       pressed(button, false);
       if (!download || !chunks.length) return;
       const url = URL.createObjectURL(stereoWav(chunks, ctx.sampleRate));
@@ -680,7 +691,7 @@ async function toggleAudioRecording() {
     if ($('status').textContent.startsWith('Could not start audio recording')) status('');
     engine.output.connect(node).connect(ctx.destination);
     capture = { stop: worklet ? () => node.port.postMessage('stop') : finish };
-    button.textContent = '■ Stop Audio';
+    audioRecordLabel(button, true);
     pressed(button, true);
   } catch (error) {
     status('Could not start audio recording. Try opening MIDI DIMI in desktop Chrome or Brave.');
