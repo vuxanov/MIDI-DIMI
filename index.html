@@ -1329,7 +1329,8 @@ function touchControl(row, index) {
 
 function noteStep(index) {
   const track = state.tracks[index];
-  return track.steps[Math.min(chosen, track.length * 16 - 1)];
+  const steps = track.steps.slice(0, track.length * 16);
+  return steps[Math.min(chosen, steps.length - 1)] || steps.find(Boolean);
 }
 function parameterValue(index, name) {
   const track = state.tracks[index];
@@ -1364,6 +1365,7 @@ function setParam(index, name, value) {
     track[name] = value;
   }
   audio?.update(index, track, state.tempo);
+  if (name === 'pitch' && keys) updateMixer();
   if (name === 'volume') playbackStatus();
   save();
 }
@@ -1373,8 +1375,9 @@ function selectTrack(index) {
   if (!availablePages().includes(page)) page = 1;
   renderMixer();
   revealChannel(index);
-  chosen = 0;
-  bank = 0;
+  const first = state.tracks[index].steps.slice(0, state.tracks[index].length * 16).findIndex(Boolean);
+  chosen = Math.max(0, first);
+  bank = Math.floor(chosen / 8);
   updateMixer();
   renderPattern();
 }
@@ -1399,7 +1402,7 @@ function toggleRecord() {
 }
 
 const octaveOf = index => state.tracks[index].octave ?? 0;
-const keyNote = (index, key) => roots[index] + scale[key] + octaveOf(index) * 12;
+const keyNote = (index, key) => clamp((state.tracks[index].notePitch ?? roots[index]) + scale[key] + octaveOf(index) * 12, 0, 127);
 
 function keyLabel(i) {
   return noteName(keyNote(selected, i));
@@ -1494,7 +1497,7 @@ function dialValue(input, index, name) {
   if (name === 'tuning') display = (Math.round((value - .5) * 24) >= 0 ? '+' : '') + Math.round((value - .5) * 24) + ' st';
   if (name === 'decay' && index < 4) display = Math.round(drumDecayTime(value, index) * 1000) + ' ms';
   if (name === 'pitch') display = noteName(noteStep(index)?.notes[0] ?? state.tracks[index].notePitch ?? roots[index]);
-  if (name === 'duration') display = (noteStep(index)?.gate ?? state.tracks[index].noteGate ?? 1) + ' steps';
+  if (name === 'duration') display = (noteStep(index)?.gate ?? state.tracks[index].noteGate ?? 1) + ' × 1/16';
   if (name === 'patch') display = patches[index][state.tracks[index].patch];
   input.title = display;
   input.setAttribute('aria-valuetext', display);
