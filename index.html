@@ -44,7 +44,8 @@ label {display:inline-flex;align-items:center;gap:7px}
 #mixer {display:grid;grid-template-columns:repeat(8,minmax(95px,1fr));min-width:760px;border:1px solid}
 .channel {display:grid;justify-items:center;gap:6px;padding:6px;text-align:center}
 .channel+.channel {border-left:1px solid}
-.filter-type {width:100%;font-size:11px;min-height:24px}
+.filter-toggle {font:inherit;border:0;min-height:0;padding:0;background:transparent;text-align:inherit;white-space:nowrap}
+.filter-toggle:hover {outline:0;text-decoration:underline}
 .track {width:100%;white-space:nowrap;padding-inline:2px;font-weight:600}
 .dial {position:relative;width:28px;height:28px;border:1px solid var(--ink);border-radius:50%;display:block;margin:auto}
 .dial::after {content:"";position:absolute;left:12px;top:3px;width:2px;height:8px;background:var(--ink);transform:rotate(var(--angle));transform-origin:50% 10px;pointer-events:none}
@@ -112,12 +113,12 @@ details p {max-width:78ch}
   section[aria-label="Mixer"] .section-head {justify-content:flex-end}
   section[aria-label="Mixer"] h2,#patternTitle,#setup {display:none}
   #mixer {width:100%;grid-template-columns:repeat(8,minmax(0,1fr));min-width:0}
-  .channel {grid-template-rows:repeat(3,20px) minmax(42px,1fr) 27px;grid-auto-rows:25px;min-width:0;gap:4px;padding:5px clamp(5px,1vw,8px)}
+  .channel {grid-template-rows:repeat(3,20px) minmax(42px,1fr) 27px;min-width:0;gap:4px;padding:5px clamp(5px,1vw,8px)}
   .knob {grid-template-columns:20px minmax(0,1fr);align-items:center;justify-self:stretch;gap:4px;text-align:left;font-size:clamp(8px,1.05vw,10px)}
+  .filter-toggle {font-size:clamp(7px,.95vw,9px)}
   .dial {width:20px;height:20px}
   .dial::after {left:8px;top:2px;height:6px;transform-origin:50% 7px}
   .fader {height:0;min-height:100%;margin-block:0}
-  .filter-type {font-size:12px;min-height:25px}
   .track {min-height:27px;font-size:11px}
   #soundField {margin-right:auto}
   #soundField label {font-size:0;gap:0}
@@ -1467,7 +1468,13 @@ function dialValue(input, index, name) {
   if (name === 'patch') display = patches[index][state.tracks[index].patch];
   input.title = display;
   input.setAttribute('aria-valuetext', display);
-  input.parentElement.nextElementSibling.textContent = page === 4 ? display : parameterLabel(name, index);
+  const caption = input.parentElement.nextElementSibling;
+  caption.textContent = name === 'cutoff'
+    ? 'Cutoff ' + (state.tracks[index].filterType === 'highpass' ? 'HP' : 'LP')
+    : page === 4 ? display : parameterLabel(name, index);
+  if (name === 'cutoff') {
+    caption.setAttribute('aria-label', names[index] + ' filter: ' + state.tracks[index].filterType + '. Switch filter type');
+  }
 }
 function renderMixer() {
   for (const element of $('pages').children) pressed(element, +element.dataset.page === page);
@@ -1476,7 +1483,7 @@ function renderMixer() {
     column.className = 'channel';
     const controls = pages[page];
     for (const name of controls) {
-      const label = document.createElement('label');
+      const label = document.createElement('div');
       label.className = 'knob';
       const ring = document.createElement('span');
       ring.className = 'dial';
@@ -1486,7 +1493,16 @@ function renderMixer() {
       input.dataset.param = name;
       input.setAttribute('aria-label', names[index] + ' ' + (parameterLabel(name, index)));
       ring.append(input);
-      label.append(ring, document.createElement('span'));
+      const caption = document.createElement(name === 'cutoff' ? 'button' : 'span');
+      if (name === 'cutoff') {
+        caption.type = 'button';
+        caption.className = 'filter-toggle';
+        caption.onclick = () => {
+          setParam(index, 'filterType', track.filterType === 'highpass' ? 'lowpass' : 'highpass');
+          dialValue(input, index, name);
+        };
+      }
+      label.append(ring, caption);
       dialValue(input, index, name);
       input.oninput = () => {
         setParam(index, name, +input.value);
@@ -1524,18 +1540,6 @@ function renderMixer() {
       touchControl(-1, index);
     };
     column.append(fader, button(names[index], () => selectTrack(index), 'track'));
-    if (page === 0) {
-      const filter = document.createElement('select');
-      filter.className = 'filter-type';
-      filter.setAttribute('aria-label', names[index] + ' filter type');
-      filter.append(new Option('LP', 'lowpass'), new Option('HP', 'highpass'));
-      filter.value = track.filterType;
-      filter.onchange = () => {
-        setParam(index, 'filterType', filter.value);
-        dialValue(column.querySelector('[data-param=cutoff]'), index, 'cutoff');
-      };
-      column.append(filter);
-    }
     return column;
   }));
   updateMixer();
