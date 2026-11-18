@@ -284,9 +284,9 @@ class Audio {
       const chorusMix = ctx.createGain();
       const chorusOsc = ctx.createOscillator();
       const chorusDepth = ctx.createGain();
-      chorus.delayTime.value = .018;
-      chorusOsc.frequency.value = .24 + index * .025;
-      chorusDepth.gain.value = .004;
+      chorus.delayTime.value = .022;
+      chorusOsc.frequency.value = .38 + index * .035;
+      chorusDepth.gain.value = .008;
       chorusOsc.connect(chorusDepth).connect(chorus.delayTime);
       chorusOsc.start();
       input.connect(filter).connect(filterSlope).connect(shaper).connect(volume);
@@ -414,7 +414,7 @@ class Audio {
     smooth(channel.dry.gain, 1 - .94 * Math.max(delayAmount, reverbAmount) ** 2);
     smooth(channel.echo.gain, 1.35 * delayAmount / wetWeight);
     smooth(channel.space.gain, 2 * reverbAmount / wetWeight);
-    smooth(channel.chorusMix.gain, index >= 5 ? track.character * .48 : 0);
+    smooth(channel.chorusMix.gain, index >= 5 ? track.character ** .75 * 1.3 : 0);
     if (index < 5 && channel.character !== track.character) {
       const drive = track.character * 7;
       channel.shaper.curve = drive < .01 ? null : Float32Array.from({ length: 1024 }, (_, i) =>
