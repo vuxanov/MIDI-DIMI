@@ -145,7 +145,7 @@ details p {max-width:78ch}
 <div class="section-head">
 <h2>Mixer</h2>
 <div class="mixer-controls">
-<div id="pages" class="group" aria-label="Control page"><button data-page="0">Mix</button><button data-page="1">Sound</button><button data-page="2">Mod</button><button data-page="3" title="Envelope">Env</button></div>
+<div id="pages" class="group" aria-label="Control page"><button data-page="0">Mix</button><button data-page="1">Sound</button><button data-page="2">Mod</button><button data-page="3" title="Envelope">Env</button><button data-page="4">Note</button></div>
 <button id="resetFX" type="button" aria-label="Reset effects" title="Reset effects for all tracks">Reset</button>
 </div>
 </div>
@@ -1022,10 +1022,10 @@ const drumRoot = 36;
 const roots = [drumRoot, drumRoot, drumRoot, drumRoot, 33, 45, 45, 45];
 const pages = [
   ['cutoff', 'delay', 'reverb'], ['resonance', 'decay', 'character'],
-  ['rate', 'depth', 'cutoff'], ['attack', 'sustain', 'release']
+  ['rate', 'depth', 'cutoff'], ['attack', 'sustain', 'release'], ['pitch', 'duration', 'patch']
 ];
 const labels = { cutoff: 'Cutoff', delay: 'Delay', reverb: 'Reverb', resonance: 'Resonance',
-  decay: 'Decay', character: 'Drive', rate: 'LFO rate', depth: 'LFO depth', attack: 'Attack', sustain: 'Sustain', release: 'Release' };
+  decay: 'Decay', character: 'Drive', rate: 'LFO rate', depth: 'LFO depth', attack: 'Attack', sustain: 'Sustain', release: 'Release', pitch: 'Pitch', duration: 'Duration', patch: 'Sound' };
 function parameterLabel(name, index) {
   if (name === 'character' && index >= 5) return 'Chorus';
   if (name === 'sustain' && index < 4) return 'Hold';
@@ -1289,9 +1289,37 @@ function touchControl(row, index) {
   }, 450);
 }
 
+function noteStep(index) {
+  const track = state.tracks[index];
+  return track.steps[Math.min(chosen, track.length * 16 - 1)];
+}
+function parameterValue(index, name) {
+  const track = state.tracks[index];
+  const step = noteStep(index);
+  if (name === 'pitch') return clamp(((step?.notes[0] ?? track.notePitch ?? roots[index]) - 24) / 72, 0, 1);
+  if (name === 'duration') return clamp(((step?.gate ?? track.noteGate ?? 1) - .25) / 15.75, 0, 1);
+  if (name === 'patch') return track.patch / (patches[index].length - 1);
+  return track[name];
+}
 function setParam(index, name, value) {
   const track = state.tracks[index];
-  track[name] = value;
+  const step = noteStep(index);
+  if (name === 'pitch') {
+    const pitch = 24 + Math.round(value * 72);
+    track.notePitch = pitch;
+    if (step) {
+      const delta = pitch - step.notes[0];
+      step.notes = step.notes.map(note => clamp(note + delta, 0, 127));
+    }
+  } else if (name === 'duration') {
+    const duration = Math.round((.25 + value * 15.75) * 4) / 4;
+    track.noteGate = duration;
+    if (step) step.gate = duration;
+  } else if (name === 'patch') {
+    track.patch = Math.round(value * (patches[index].length - 1));
+  } else {
+    track[name] = value;
+  }
   audio?.update(index, track, state.tempo);
   if (name === 'volume') playbackStatus();
   save();
@@ -1308,6 +1336,7 @@ function selectTrack(index) {
 function setPage(value) {
   page = (value + pages.length) % pages.length;
   renderMixer();
+  renderSteps();
 }
 function toggleKeys() {
   releaseAll();
@@ -1405,7 +1434,7 @@ function updateMixer() {
 }
 
 function dialValue(input, index, name) {
-  const value = state.tracks[index][name];
+  const value = parameterValue(index, name);
   input.value = value;
   input.parentElement.style.setProperty('--angle', `${Number(input.value) * 270 - 135}deg`);
   let display = Math.round(value * 100) + '%';
@@ -1414,9 +1443,12 @@ function dialValue(input, index, name) {
   if (name === 'attack') display = Math.round(1000 * attackTime(value, index)) + ' ms';
   if (name === 'sustain' && index < 4) display = Math.round(1000 * holdTime(value)) + ' ms';
   if (name === 'release') display = releaseTime(value, index).toFixed(2) + ' s';
+  if (name === 'pitch') display = noteName(noteStep(index)?.notes[0] ?? state.tracks[index].notePitch ?? roots[index]);
+  if (name === 'duration') display = (noteStep(index)?.gate ?? state.tracks[index].noteGate ?? 1) + ' steps';
+  if (name === 'patch') display = patches[index][state.tracks[index].patch];
   input.title = display;
   input.setAttribute('aria-valuetext', display);
-  input.parentElement.nextElementSibling.textContent = parameterLabel(name, index);
+  input.parentElement.nextElementSibling.textContent = page === 4 ? display : parameterLabel(name, index);
 }
 function renderMixer() {
   for (const element of $('pages').children) pressed(element, +element.dataset.page === page);
@@ -1501,7 +1533,7 @@ function toggleStep(index) {
   const track = state.tracks[selected];
   chosen = index;
   bank = Math.floor(index / 8);
-  track.steps[index] = track.steps[index] ? null : { notes: [roots[selected]], gate: 1, velocity: .82 };
+  track.steps[index] = track.steps[index] ? null : { notes: [track.notePitch ?? roots[selected]], gate: track.noteGate ?? 1, velocity: .82 };
   save();
   renderPattern();
 }
@@ -1543,7 +1575,7 @@ function renderSteps() {
       stepButtons[index].focus({ preventScroll: true });
     };
     const element = button('', event => {
-      if (event?.shiftKey && selected >= 4 && step) {
+      if (step && (page === 4 || (event?.shiftKey && selected >= 4))) {
         selectNote();
         return;
       }
@@ -1563,7 +1595,7 @@ function renderSteps() {
     element.append(mark);
     pressed(element, step);
     element.setAttribute('aria-label', `Bar ${Math.floor(index / 16) + 1}, step ${index % 16 + 1}${step && selected >= 4 ? ', ' + step.notes.map(noteName).join(' ') : ''}`);
-    element.classList.toggle('chosen', selected >= 4 && Boolean(step) && chosen === index);
+    element.classList.toggle('chosen', (page === 4 || selected >= 4) && Boolean(step) && chosen === index);
     element.classList.toggle('cursor', visibleStep % (track.length * 16) === index);
     return element;
   });
@@ -1599,31 +1631,10 @@ function renderEditor() {
   const track = state.tracks[selected];
   $('editor').replaceChildren();
   $('soundField').replaceChildren();
-  selectField('Sound', patches[selected], track.patch, value => setParam(selected, 'patch', value), $('soundField'));
-  if (selected >= 4) {
-    const step = track.steps[chosen];
-    if (step) {
-      const first = Object.assign(document.createElement('input'), { type: 'number', min: 24, max: 96, value: step.notes[0] });
-      first.onchange = () => {
-        const root = clamp(Math.round(+first.value || step.notes[0]), 24, 96);
-        const delta = root - step.notes[0];
-        step.notes = step.notes.map(note => clamp(note + delta, 0, 127));
-        first.value = root;
-        renderSteps();
-        save();
-      };
-      first.title = 'MIDI note number';
-      field('Pitch', first);
-      const gate = Object.assign(document.createElement('input'), { type: 'number', min: .25, max: 64, step: .25, value: step.gate });
-      gate.onchange = () => {
-        step.gate = clamp(+gate.value || 1, .25, 64);
-        gate.value = step.gate;
-        save();
-      };
-      gate.title = 'Duration in sixteenth notes';
-      field('Duration', gate);
-    }
-  }
+  $('soundField').hidden = page === 4;
+  if (page !== 4) selectField('Sound', patches[selected], track.patch, value =>
+    setParam(selected, 'patch', value / (patches[selected].length - 1)), $('soundField'));
+
 }
 function renderPattern() {
   $('patternTitle').textContent = names[selected];
@@ -1632,6 +1643,11 @@ function renderPattern() {
   playbackStatus();
   renderSteps();
   renderEditor();
+  if (page === 4) {
+    for (const [index, column] of [...$('mixer').children].entries()) {
+      for (const name of pages[page]) dialValue(column.querySelector(`[data-param=${name}]`), index, name);
+    }
+  }
 }
 
 function applyTheme(dark) {
@@ -1721,7 +1737,7 @@ updateLights = setupMIDI({
   },
   continuous: (type, index, row, raw, relative) => {
     const name = type === 'fader' ? 'volume' : pages[page][row];
-    const value = relative ? clamp(state.tracks[index][name] + (raw - 64) / 100, 0, 1) : raw / 127;
+    const value = relative ? clamp(parameterValue(index, name) + (raw - 64) / 100, 0, 1) : raw / 127;
     setParam(index, name, value);
     revealChannel(index);
     touchControl(type === 'fader' ? -1 : row, index);
