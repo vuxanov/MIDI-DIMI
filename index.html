@@ -47,7 +47,7 @@ label {display:inline-flex;align-items:center;gap:7px}
 .channel {display:grid;justify-items:center;gap:6px;padding:6px;text-align:center}
 .channel+.channel {border-left:1px solid}
 .filter-toggle {font:inherit;border:0;min-height:0;padding:0;background:transparent;text-align:inherit;white-space:nowrap}
-.filter-toggle::after {content:" ▾";font-size:.85em}
+.filter-toggle::after {content:" ▾";font-size:1.15em}
 .filter-toggle:hover {outline:0;text-decoration:underline}
 .track {width:100%;white-space:nowrap;padding-inline:2px;font-weight:600}
 .dial {position:relative;width:28px;height:28px;border:1px solid var(--ink);border-radius:50%;display:block;margin:auto}
@@ -61,7 +61,8 @@ label {display:inline-flex;align-items:center;gap:7px}
 .piano-key {display:flex;align-items:center;justify-content:center;min-height:38px;min-width:0;padding:8px 0;touch-action:none}
 #octave {font-size:12px;white-space:nowrap}
 .pattern-toolbar {display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.pattern-toolbar h2 {margin-right:auto}
+.section-label {display:flex;align-items:center;gap:8px}
+.pattern-toolbar .section-label {margin-right:auto}
 #soundField {display:inline-flex}
 .dial:has(input.touched),.dial:has(input:active) {background:var(--ink)}
 .dial:has(input.touched)::after,.dial:has(input:active)::after {background:var(--paper)}
@@ -103,7 +104,6 @@ details p {max-width:78ch}
   .top-controls button {padding-inline:4px;font-size:clamp(10px,1.5vw,12px)}
   .top-controls #themeToggle {width:23px}
   .top-controls #tempo {width:46px}
-  .top-controls #preset {max-width:100px}
   .top-controls select {padding-right:22px;background-position:right 11px center,right 6px center}
   section {margin-top:6px}
   .section-head {margin-bottom:4px}
@@ -113,8 +113,9 @@ details p {max-width:78ch}
   input[type=number] {width:51px}
   section[aria-label="Mixer"] {display:flex;flex:1 0 auto;flex-direction:column}
   section[aria-label="Mixer"] .scroll {display:flex;flex:1 0 auto}
-  section[aria-label="Mixer"] .section-head {justify-content:flex-end}
-  section[aria-label="Mixer"] h2,#patternTitle,#setup {display:none}
+  #setup {display:none}
+  .section-label {gap:5px}
+  .section-label h2 {font-size:12px}
   #mixer {width:100%;grid-template-columns:repeat(8,minmax(0,1fr));min-width:0}
   .channel {grid-template-rows:repeat(3,20px) minmax(42px,1fr) 27px;min-width:0;gap:4px;padding:5px clamp(5px,1vw,8px)}
   .knob {grid-template-columns:20px minmax(0,1fr);align-items:center;justify-self:stretch;gap:4px;text-align:left;font-size:clamp(8px,1.05vw,10px)}
@@ -141,25 +142,22 @@ details p {max-width:78ch}
 <section class="transport" aria-label="Transport">
 <button id="play" class="primary">▶ Play</button><button id="record" aria-pressed="false">● Record</button>
 <label>BPM <input id="tempo" type="number" min="40" max="220" value="128"></label>
-<label>Presets <select id="preset"><option value="blank">Blank</option><option value="techno">Techno</option><option value="hypnotic">Hypnotic</option><option value="ambient">Ambient</option></select></label>
-<button id="resetSession" type="button" title="Reset to a blank session">Reset</button>
 </section>
 </div>
 <p id="status" role="status" hidden></p>
 <p id="playbackStatus" role="status" hidden></p>
 <section aria-label="Mixer">
 <div class="section-head">
-<h2>Mixer</h2>
+<div class="section-label"><h2>Mixer</h2><button id="resetFX" type="button" aria-label="Reset effects" title="Reset effects for all tracks">Reset</button></div>
 <div class="mixer-controls">
 <div id="pages" class="group" aria-label="Control page"><button data-page="0">Mix</button><button data-page="1">Sound</button><button data-page="2">Mod</button><button data-page="3" title="Envelope">Env</button><button data-page="4">Note</button></div>
-<button id="resetFX" type="button" aria-label="Reset effects" title="Reset effects for all tracks">Reset</button>
 </div>
 </div>
 <div class="scroll"><div id="mixer"></div></div>
 </section>
 <section aria-label="Pattern">
 <div class="section-head pattern-toolbar">
-<h2 id="patternTitle">Pattern</h2>
+<div class="section-label"><h2 id="patternTitle">Pattern</h2><button id="resetBars" type="button" aria-label="Clear selected track pattern" title="Clear this track’s pattern">Reset</button></div>
 <div id="soundField"></div>
 <select id="length" aria-label="Pattern length"><option value="1">1 bar</option><option value="2">2 bars</option><option value="4">4 bars</option></select>
 <output id="octave" aria-live="polite" hidden></output>
@@ -1286,7 +1284,6 @@ function applyPreset(name) {
   queued = undefined;
   chosen = 0;
   bank = 0;
-  $('preset').value = name;
   $('tempo').value = state.tempo;
   updateAudio();
   renderMixer();
@@ -1297,7 +1294,7 @@ function applyPreset(name) {
 function choosePreset(name) {
   if (playing) {
     queued = name;
-    status('Queued · ' + $('preset').selectedOptions[0].textContent);
+    status('Queued · ' + name);
   } else {
     applyPreset(name);
   }
@@ -1753,11 +1750,13 @@ $('tempo').onchange = () => {
   updateAudio();
   save();
 };
-$('preset').value = state.preset;
-$('preset').onchange = () => choosePreset($('preset').value);
-$('resetSession').onclick = () => {
-  $('preset').value = 'blank';
-  choosePreset('blank');
+$('resetBars').onclick = () => {
+  releaseAll();
+  state.tracks[selected].steps.fill(null);
+  chosen = 0;
+  bank = 0;
+  renderPattern();
+  save();
 };
 $('resetFX').onclick = () => {
   state.tracks.forEach(track => Object.assign(track, defaultEffects));
