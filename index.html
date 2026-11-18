@@ -751,6 +751,19 @@ function setupMIDI(actions) {
   let legacyTemplate = 8;
   let legacyTemplateReported = false;
   const sent = new Map();
+  let navigationLEDTimer;
+  function refreshNavigationLEDs() {
+    clearTimeout(navigationLEDTimer);
+    // Navigation can trigger a local LED update in the controller/bridge.
+    // Repaint after it settles, reading the latest bank rather than a captured one.
+    sent.clear();
+    feedback();
+    navigationLEDTimer = setTimeout(() => {
+      if (!output) return;
+      sent.clear();
+      feedback();
+    }, 80);
+  }
   let learned = {};
   try { learned = JSON.parse(localStorage.getItem('dimi-midi-v1')) || {}; } catch {}
 
@@ -758,6 +771,7 @@ function setupMIDI(actions) {
     try { localStorage.setItem('dimi-midi-v1', JSON.stringify(learned)); } catch {}
   }
   function detach() {
+    clearTimeout(navigationLEDTimer);
     binding++;
     if (active) active.onmidimessage = null;
     ledTest.disabled = true;
@@ -837,7 +851,8 @@ function setupMIDI(actions) {
       }
       actions.releasePad(key);
       if (action === 'shift') shifted = false;
-      feedback();
+      if (action === 'previous' || action === 'next') refreshNavigationLEDs();
+      else feedback();
       return;
     }
     if (action === 'shift') shifted = true;
@@ -851,10 +866,7 @@ function setupMIDI(actions) {
       ({ play: actions.transport, record: actions.toggleRecord, keys: actions.toggleKeys,
         pageUp: () => actions.page(1), pageDown: () => actions.page(-1),
         previous: () => actions.stepBank(-1), next: () => actions.stepBank(1) })[action]?.();
-      if (action === 'previous' || action === 'next') {
-        sent.clear();
-        feedback();
-      }
+      if (action === 'previous' || action === 'next') refreshNavigationLEDs();
     }
   }
   async function refresh() {
@@ -1055,7 +1067,7 @@ function setupMIDI(actions) {
         } else if (access.sysexEnabled) {
           knobLEDs.push(index, 28);
         } else {
-          send(144 + legacyChannel, [13, 29, 49][row] + i, 28);
+          send(176 + legacyChannel, [13, 29, 49][row] + i, 28);
         }
       }
     }
