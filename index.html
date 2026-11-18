@@ -45,6 +45,7 @@ label {display:inline-flex;align-items:center;gap:7px}
 .channel {display:grid;justify-items:center;gap:6px;padding:6px;text-align:center}
 .channel+.channel {border-left:1px solid}
 .filter-toggle {font:inherit;border:0;min-height:0;padding:0;background:transparent;text-align:inherit;white-space:nowrap}
+.filter-toggle::after {content:" ▾";font-size:.85em}
 .filter-toggle:hover {outline:0;text-decoration:underline}
 .track {width:100%;white-space:nowrap;padding-inline:2px;font-weight:600}
 .dial {position:relative;width:28px;height:28px;border:1px solid var(--ink);border-radius:50%;display:block;margin:auto}
@@ -178,7 +179,7 @@ const tau = Math.PI * 2;
 const hz = note => 440 * 2 ** ((note - 69) / 12);
 const cutoffFloors = [42, 480, 1600, 320, 62, 240, 340, 560];
 const cutoffKnee = .08;
-const defaultFilterTypes = ['lowpass', 'highpass', 'highpass', 'highpass', 'lowpass', 'lowpass', 'highpass', 'highpass'];
+const defaultFilterTypes = ['lowpass', 'highpass', 'highpass', 'highpass', 'lowpass', 'lowpass', 'lowpass', 'lowpass'];
 function filterFrequency(value, index, type) {
   if (type === 'highpass') {
     const maximum = [2400, 3000, 6500, 3800, 2400, 4000, 2200, 4500][index];
