@@ -153,9 +153,9 @@ details p {max-width:78ch}
 <details id="optionsMenu" class="overflow">
 <summary aria-label="Options" title="Options">⋯</summary>
 <div class="overflow-panel">
-<button id="resetBars" type="button">Clear all patterns</button>
-<button id="resetFX" type="button">Reset all effects</button>
 <button id="themeToggle" type="button" aria-pressed="false">☾ Dark mode</button>
+<button id="resetFX" type="button">Reset all effects</button>
+<button id="resetBars" type="button">× Delete everything</button>
 </div>
 </details>
 </div>
@@ -1783,6 +1783,7 @@ $('tempo').onchange = () => {
   save();
 };
 $('resetBars').onclick = () => {
+  if (!window.confirm('Delete all notes and hits from every track? This cannot be undone.')) return;
   releaseAll();
   state.tracks.forEach(track => track.steps.fill(null));
   audio?.stopSequence();
