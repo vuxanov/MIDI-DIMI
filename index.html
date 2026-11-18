@@ -44,6 +44,7 @@ label {display:inline-flex;align-items:center;gap:7px}
 #mixer {display:grid;grid-template-columns:repeat(8,minmax(95px,1fr));min-width:760px;border:1px solid}
 .channel {display:grid;justify-items:center;gap:6px;padding:6px;text-align:center}
 .channel+.channel {border-left:1px solid}
+.filter-type {width:100%;font-size:11px;min-height:24px}
 .track {width:100%;white-space:nowrap;padding-inline:2px;font-weight:600}
 .dial {position:relative;width:28px;height:28px;border:1px solid var(--ink);border-radius:50%;display:block;margin:auto}
 .dial::after {content:"";position:absolute;left:12px;top:3px;width:2px;height:8px;background:var(--ink);transform:rotate(var(--angle));transform-origin:50% 10px;pointer-events:none}
@@ -111,11 +112,12 @@ details p {max-width:78ch}
   section[aria-label="Mixer"] .section-head {justify-content:flex-end}
   section[aria-label="Mixer"] h2,#patternTitle,#setup {display:none}
   #mixer {width:100%;grid-template-columns:repeat(8,minmax(0,1fr));min-width:0}
-  .channel {grid-template-rows:repeat(3,20px) minmax(42px,1fr) 27px;min-width:0;gap:4px;padding:5px clamp(5px,1vw,8px)}
+  .channel {grid-template-rows:repeat(3,20px) minmax(42px,1fr) 27px;grid-auto-rows:25px;min-width:0;gap:4px;padding:5px clamp(5px,1vw,8px)}
   .knob {grid-template-columns:20px minmax(0,1fr);align-items:center;justify-self:stretch;gap:4px;text-align:left;font-size:clamp(8px,1.05vw,10px)}
   .dial {width:20px;height:20px}
   .dial::after {left:8px;top:2px;height:6px;transform-origin:50% 7px}
   .fader {height:0;min-height:100%;margin-block:0}
+  .filter-type {font-size:12px;min-height:25px}
   .track {min-height:27px;font-size:11px}
   #soundField {margin-right:auto}
   #soundField label {font-size:0;gap:0}
@@ -175,6 +177,14 @@ const tau = Math.PI * 2;
 const hz = note => 440 * 2 ** ((note - 69) / 12);
 const cutoffFloors = [42, 480, 1600, 320, 62, 240, 340, 560];
 const cutoffKnee = .08;
+const defaultFilterTypes = ['lowpass', 'highpass', 'highpass', 'highpass', 'lowpass', 'lowpass', 'highpass', 'highpass'];
+function filterFrequency(value, index, type) {
+  if (type === 'highpass') {
+    const maximum = [2400, 3000, 6500, 3800, 2400, 4000, 2200, 4500][index];
+    return 12 * (maximum / 12) ** value;
+  }
+  return cutoff(value, index);
+}
 const drumBodyLevels = [.50, .34, .31, .37];
 const voiceLevels = [3.91, 1.49, 1.10, .92, .62, .48, .33, .89];
 const synthWaveforms = [
@@ -345,7 +355,9 @@ class Audio {
       smooth(this.effects.delay.delayTime, 60 / tempo * .75);
       this.tempo = tempo;
     }
-    const frequency = cutoff(track.cutoff, index);
+    channel.filter.type = track.filterType;
+    channel.filterSlope.type = track.filterType;
+    const frequency = filterFrequency(track.cutoff, index, track.filterType);
     smooth(channel.filter.frequency, frequency);
     smooth(channel.filterSlope.frequency, frequency);
     smooth(channel.filter.Q, .25 + 16 * track.resonance + 2.5 * track.depth);
@@ -1087,6 +1099,7 @@ function session(preset) {
   const hypnotic = preset === 'hypnotic';
   const tracks = names.map((_, i) => ({
     length: i >= 6 ? 4 : i >= 4 ? 2 : 1, steps: Array(64).fill(null), patch: 0,
+    filterType: defaultFilterTypes[i],
     volume: [.86,.56,.49,.43,.63,.49,.57,.38][i], mute: false,
     cutoff: [.7,.86,.96,.75,.54,.65,.68,.57][i], delay: [0,.10,.05,.23,.07,.32,.25,.2][i],
     reverb: [0,.15,.12,.27,.04,.27,.47,.52][i], resonance: i === 4 ? .18 : .04,
@@ -1115,6 +1128,9 @@ function session(preset) {
   } else {
     pattern = technoPattern(tracks);
   }
+  tracks.forEach((track, index) => {
+    if (track.filterType === 'highpass') track.cutoff = [.5, .52, .62, .47, .5, .5, .36, .44][index];
+  });
   pattern.forEach((events, index) => events.forEach(({ at, ...step }) => { tracks[index].steps[at] = step; }));
   return { preset, tempo: ambient ? 86 : hypnotic ? 132 : 128, tracks };
 }
@@ -1124,6 +1140,9 @@ try {
   const saved = JSON.parse(localStorage.getItem('dimi-session-v1'));
   if (saved?.tracks?.length === 8 && saved.tracks.every(track => track.steps?.length === 64)) state = saved;
 } catch {}
+for (const track of state.tracks) {
+  if (!['lowpass', 'highpass'].includes(track.filterType)) track.filterType = 'lowpass';
+}
 let saveTimeout;
 function save() {
   clearTimeout(saveTimeout);
@@ -1438,7 +1457,7 @@ function dialValue(input, index, name) {
   input.value = value;
   input.parentElement.style.setProperty('--angle', `${Number(input.value) * 270 - 135}deg`);
   let display = Math.round(value * 100) + '%';
-  if (name === 'cutoff') display = Math.round(cutoff(value, index)) + ' Hz';
+  if (name === 'cutoff') display = Math.round(filterFrequency(value, index, state.tracks[index].filterType)) + ' Hz';
   if (name === 'rate') display = lfoRate(value, state.tempo).toFixed(2) + ' Hz';
   if (name === 'attack') display = Math.round(1000 * attackTime(value, index)) + ' ms';
   if (name === 'sustain' && index < 4) display = Math.round(1000 * holdTime(value)) + ' ms';
@@ -1505,6 +1524,18 @@ function renderMixer() {
       touchControl(-1, index);
     };
     column.append(fader, button(names[index], () => selectTrack(index), 'track'));
+    if (page === 0) {
+      const filter = document.createElement('select');
+      filter.className = 'filter-type';
+      filter.setAttribute('aria-label', names[index] + ' filter type');
+      filter.append(new Option('LP', 'lowpass'), new Option('HP', 'highpass'));
+      filter.value = track.filterType;
+      filter.onchange = () => {
+        setParam(index, 'filterType', filter.value);
+        dialValue(column.querySelector('[data-param=cutoff]'), index, 'cutoff');
+      };
+      column.append(filter);
+    }
     return column;
   }));
   updateMixer();
