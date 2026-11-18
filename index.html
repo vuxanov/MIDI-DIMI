@@ -30,6 +30,8 @@ select {
   background-repeat:no-repeat;
 }
 button,select,summary {cursor:pointer}
+[hidden] {display:none !important}
+.dial:has(input:disabled) {opacity:.25}
 button:hover {outline:1px solid;outline-offset:-3px}
 :focus-visible {outline:2px dashed var(--ink);outline-offset:3px}
 button.primary,button[aria-pressed=true] {background:var(--ink);color:var(--paper)}
@@ -203,6 +205,7 @@ function cutoff(value, index) {
 }
 const attackTime = (value, index) => .003 + value ** 2 * (index < 4 ? .17 : index === 7 ? .55 : 1.4);
 const holdTime = value => .22 * value ** 2;
+const drumDecayTime = (value, index) => [.035, .025, .012, .025][index] * ([30, 20, 48, 32][index] ** value);
 const releaseTime = (value, index) => .025 + value ** 2 * (index < 4 ? .65 : index >= 6 ? 5 : 2.7);
 const lfoRate = (value, tempo) => tempo / 240 * 2 ** (value * 8 - 3);
 const clamp = (value, minimum, maximum) => Math.min(maximum, Math.max(minimum, value));
@@ -310,27 +313,27 @@ class Audio {
   drums(variant) {
     let previous = 0;
     return [
-      this.buffer(.83, t => {
+      this.buffer(2.2, t => {
         const fundamental = 45 + variant * 5;
         const sweep = .034 + variant * .009;
         const phase = tau * (fundamental * t + 135 * sweep * (1 - Math.exp(-t / sweep)));
-        return Math.tanh(1.4 * Math.sin(phase)) * Math.exp(-t * (5 + variant)) * Math.min(1, t * 900);
+        return Math.tanh(1.4 * Math.sin(phase)) * Math.min(1, t * 900);
       }),
-      this.buffer(.46, t => {
+      this.buffer(1.4, t => {
         const noise = Math.random() * 2 - 1;
         const high = noise - previous * .78;
         previous = noise;
         const bursts = [0, .011, .024].reduce((sum, start) =>
           t >= start ? sum + Math.exp(-(t - start) * 135) : sum, 0);
-        return high * (.26 * bursts + .24 * Math.exp(-t * (11 + variant * 5)));
+        return high * (.26 * bursts + .24);
       }),
-      this.buffer(.55, t => {
+      this.buffer(1.5, t => {
         const metal = [3119, 4187, 5711, 6571, 7949].reduce((sum, f) => sum + Math.sign(Math.sin(tau * f * t)), 0);
-        return (.07 * metal + .25 * (Math.random() * 2 - 1)) * Math.exp(-t * (34 - variant * 10));
+        return (.07 * metal + .25 * (Math.random() * 2 - 1));
       }),
-      this.buffer(.75, t => {
+      this.buffer(1.8, t => {
         const f = 170 + variant * 63;
-        return .65 * Math.sin(tau * f * t + 2.2 * Math.sin(tau * f * 2.41 * t)) * Math.exp(-t * (8 + variant * 2));
+        return .65 * Math.sin(tau * f * t + 2.2 * Math.sin(tau * f * 2.41 * t));
       })
     ].map((buffer, index) => {
       const samples = buffer.getChannelData(0);
@@ -392,14 +395,14 @@ class Audio {
     const sources = [];
     const drum = index < 4;
     const texture = index === 7;
-    const peak = voiceLevels[index] * velocity / Math.sqrt(notes.length);
+    const peak = Math.max(.00012, voiceLevels[index] * velocity / Math.sqrt(notes.length));
     const pad = index === 6;
-    const configuredAttack = attackTime(track.attack, index);
+    const configuredAttack = drum ? .002 : attackTime(track.attack, index);
     const attack = pad && gate !== null ? Math.min(configuredAttack, gate * .72) : configuredAttack;
-    const hold = drum ? holdTime(track.sustain) : 0;
-    const release = releaseTime(track.release, index);
-    const decay = .025 + track.decay ** 2 * (drum ? 1.15 : 2.4);
-    const sustain = Math.max(.00012, peak * (drum ? .035 : track.sustain));
+    const hold = 0;
+    const release = drum ? .012 : releaseTime(track.release, index);
+    const decay = drum ? drumDecayTime(track.decay, index) : .025 + track.decay ** 2 * 2.4;
+    const sustain = Math.max(.00012, (drum ? .00012 : peak * track.sustain));
     amp.gain.setValueAtTime(.0001, time);
     if (pad) amp.gain.linearRampToValueAtTime(peak, time + attack);
     else amp.gain.exponentialRampToValueAtTime(peak, time + attack);
@@ -409,7 +412,8 @@ class Audio {
       for (const note of notes) {
         const source = ctx.createBufferSource();
         source.buffer = this.kits[track.patch][index];
-        source.playbackRate.value = 2 ** ((note - drumRoot) / 12);
+        source.playbackRate.value = 2 ** ((note - drumRoot + Math.round(((track.tuning ?? .5) - .5) * 24)) / 12);
+        source.loop = true;
         source.connect(amp);
         sources.push(source);
       }
@@ -1038,8 +1042,14 @@ const pages = [
   ['cutoff', 'delay', 'reverb'], ['resonance', 'decay', 'character'],
   ['rate', 'depth', 'cutoff'], ['attack', 'sustain', 'release'], ['pitch', 'duration', 'patch']
 ];
+function trackControls(index) {
+  if (index < 4 && page === 1) return ['tuning', 'decay', 'character'];
+  if (index < 4 && page === 4) return ['pitch', 'velocity', 'patch'];
+  return pages[page];
+}
+const availablePages = () => selected < 4 ? [0, 1, 4] : [0, 1, 2, 3, 4];
 const labels = { cutoff: 'Cutoff', delay: 'Delay', reverb: 'Reverb', resonance: 'Resonance',
-  decay: 'Decay', character: 'Drive', rate: 'LFO rate', depth: 'LFO depth', attack: 'Attack', sustain: 'Sustain', release: 'Release', pitch: 'Pitch', duration: 'Duration', patch: 'Sound' };
+  decay: 'Decay', character: 'Drive', rate: 'LFO rate', depth: 'LFO depth', attack: 'Attack', sustain: 'Sustain', release: 'Release', tuning: 'Tuning', velocity: 'Velocity', pitch: 'Pitch', duration: 'Duration', patch: 'Sound' };
 function parameterLabel(name, index) {
   if (name === 'character' && index >= 5) return 'Chorus';
   if (name === 'sustain' && index < 4) return 'Hold';
@@ -1100,7 +1110,7 @@ function session(preset) {
   const ambient = preset === 'ambient';
   const hypnotic = preset === 'hypnotic';
   const tracks = names.map((_, i) => ({
-    length: i >= 6 ? 4 : i >= 4 ? 2 : 1, steps: Array(64).fill(null), patch: 0,
+    length: i >= 6 ? 4 : i >= 4 ? 2 : 1, steps: Array(64).fill(null), patch: 0, tuning: .5,
     filterType: defaultFilterTypes[i],
     volume: [.86,.56,.49,.43,.63,.49,.57,.38][i], mute: false,
     cutoff: [.7,.86,.96,.75,.54,.65,.68,.57][i], delay: [0,.10,.05,.23,.07,.32,.25,.2][i],
@@ -1295,7 +1305,7 @@ function revealChannel(index) {
 }
 
 function touchControl(row, index) {
-  const name = row === -1 ? 'volume' : pages[page][row];
+  const name = row === -1 ? 'volume' : trackControls(index)[row];
   touchedInput?.classList.remove('touched');
   touchedInput = $('mixer').children[index]?.querySelector(`[data-param=${name}]`);
   touchedInput?.classList.add('touched');
@@ -1317,6 +1327,8 @@ function noteStep(index) {
 function parameterValue(index, name) {
   const track = state.tracks[index];
   const step = noteStep(index);
+  if (name === 'tuning') return track.tuning ?? .5;
+  if (name === 'velocity') return step?.velocity ?? track.noteVelocity ?? .82;
   if (name === 'pitch') return clamp(((step?.notes[0] ?? track.notePitch ?? roots[index]) - 24) / 72, 0, 1);
   if (name === 'duration') return clamp(((step?.gate ?? track.noteGate ?? 1) - .25) / 15.75, 0, 1);
   if (name === 'patch') return track.patch / (patches[index].length - 1);
@@ -1325,7 +1337,10 @@ function parameterValue(index, name) {
 function setParam(index, name, value) {
   const track = state.tracks[index];
   const step = noteStep(index);
-  if (name === 'pitch') {
+  if (name === 'velocity') {
+    track.noteVelocity = value;
+    if (step) step.velocity = value;
+  } else if (name === 'pitch') {
     const pitch = 24 + Math.round(value * 72);
     track.notePitch = pitch;
     if (step) {
@@ -1348,6 +1363,8 @@ function setParam(index, name, value) {
 function selectTrack(index) {
   releaseAll();
   selected = index;
+  if (!availablePages().includes(page)) page = 1;
+  renderMixer();
   revealChannel(index);
   chosen = 0;
   bank = 0;
@@ -1355,7 +1372,10 @@ function selectTrack(index) {
   renderPattern();
 }
 function setPage(value) {
+  const allowed = availablePages();
+  const direction = value < page ? -1 : 1;
   page = (value + pages.length) % pages.length;
+  while (!allowed.includes(page)) page = (page + direction + pages.length) % pages.length;
   renderMixer();
   renderSteps();
 }
@@ -1464,13 +1484,16 @@ function dialValue(input, index, name) {
   if (name === 'attack') display = Math.round(1000 * attackTime(value, index)) + ' ms';
   if (name === 'sustain' && index < 4) display = Math.round(1000 * holdTime(value)) + ' ms';
   if (name === 'release') display = releaseTime(value, index).toFixed(2) + ' s';
+  if (name === 'tuning') display = (Math.round((value - .5) * 24) >= 0 ? '+' : '') + Math.round((value - .5) * 24) + ' st';
+  if (name === 'decay' && index < 4) display = Math.round(drumDecayTime(value, index) * 1000) + ' ms';
+  if (index < 4 && (page === 2 || page === 3)) display = '—';
   if (name === 'pitch') display = noteName(noteStep(index)?.notes[0] ?? state.tracks[index].notePitch ?? roots[index]);
   if (name === 'duration') display = (noteStep(index)?.gate ?? state.tracks[index].noteGate ?? 1) + ' steps';
   if (name === 'patch') display = patches[index][state.tracks[index].patch];
   input.title = display;
   input.setAttribute('aria-valuetext', display);
   const caption = input.parentElement.nextElementSibling;
-  caption.textContent = name === 'cutoff'
+  caption.textContent = index < 4 && (page === 2 || page === 3) ? '—' : name === 'cutoff'
     ? 'Cutoff ' + (state.tracks[index].filterType === 'highpass' ? 'HP' : 'LP')
     : page === 4 ? display : parameterLabel(name, index);
   if (name === 'cutoff') {
@@ -1478,11 +1501,14 @@ function dialValue(input, index, name) {
   }
 }
 function renderMixer() {
-  for (const element of $('pages').children) pressed(element, +element.dataset.page === page);
+  for (const element of $('pages').children) {
+    element.hidden = !availablePages().includes(+element.dataset.page);
+    pressed(element, +element.dataset.page === page);
+  }
   $('mixer').replaceChildren(...state.tracks.map((track, index) => {
     const column = document.createElement('div');
     column.className = 'channel';
-    const controls = pages[page];
+    const controls = trackControls(index);
     for (const name of controls) {
       const label = document.createElement('div');
       label.className = 'knob';
@@ -1491,6 +1517,7 @@ function renderMixer() {
       const input = Object.assign(document.createElement('input'), {
         type: 'range', min: 0, max: 1, step: .001
       });
+      input.disabled = index < 4 && (page === 2 || page === 3);
       input.dataset.param = name;
       input.setAttribute('aria-label', names[index] + ' ' + (parameterLabel(name, index)));
       ring.append(input);
@@ -1512,7 +1539,7 @@ function renderMixer() {
       };
       let drag;
       input.onpointerdown = event => {
-        if (event.button !== 0 || drag) return;
+        if (input.disabled || event.button !== 0 || drag) return;
         event.preventDefault();
         input.focus({ preventScroll: true });
         input.setPointerCapture(event.pointerId);
@@ -1569,7 +1596,7 @@ function toggleStep(index) {
   const track = state.tracks[selected];
   chosen = index;
   bank = Math.floor(index / 8);
-  track.steps[index] = track.steps[index] ? null : { notes: [track.notePitch ?? roots[selected]], gate: track.noteGate ?? 1, velocity: .82 };
+  track.steps[index] = track.steps[index] ? null : { notes: [track.notePitch ?? roots[selected]], gate: track.noteGate ?? 1, velocity: track.noteVelocity ?? .82 };
   save();
   renderPattern();
 }
@@ -1681,7 +1708,7 @@ function renderPattern() {
   renderEditor();
   if (page === 4) {
     for (const [index, column] of [...$('mixer').children].entries()) {
-      for (const name of pages[page]) dialValue(column.querySelector(`[data-param=${name}]`), index, name);
+      for (const name of trackControls(index)) dialValue(column.querySelector(`[data-param=${name}]`), index, name);
     }
   }
 }
@@ -1772,7 +1799,8 @@ updateLights = setupMIDI({
     touchControl(row, index);
   },
   continuous: (type, index, row, raw, relative) => {
-    const name = type === 'fader' ? 'volume' : pages[page][row];
+    if (type !== 'fader' && index < 4 && (page === 2 || page === 3)) return;
+    const name = type === 'fader' ? 'volume' : trackControls(index)[row];
     const value = relative ? clamp(parameterValue(index, name) + (raw - 64) / 100, 0, 1) : raw / 127;
     setParam(index, name, value);
     revealChannel(index);
