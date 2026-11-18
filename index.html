@@ -166,6 +166,7 @@ details p {max-width:78ch}
 <summary aria-label="Options" title="Options">⋯</summary>
 <div class="overflow-panel">
 <button id="themeToggle" type="button" aria-pressed="false">☾ Dark mode</button>
+<button id="resetActiveFX" type="button">Reset active effects</button>
 <button id="resetFX" type="button">Reset all effects</button>
 <button id="resetBars" type="button">× Delete everything</button>
 </div>
@@ -1819,6 +1820,13 @@ $('confirmDelete').onclick = () => {
   chosen = 0;
   bank = 0;
   renderPattern();
+  save();
+};
+$('resetActiveFX').onclick = () => {
+  $('optionsMenu').open = false;
+  Object.assign(state.tracks[selected], defaultEffects);
+  audio?.update(selected, state.tracks[selected], state.tempo);
+  renderMixer();
   save();
 };
 $('resetFX').onclick = () => {
