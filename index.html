@@ -751,24 +751,6 @@ function setupMIDI(actions) {
   let legacyTemplate = 8;
   let legacyTemplateReported = false;
   const sent = new Map();
-  let navigationLEDTimer;
-  function refreshNavigationLEDs() {
-    clearTimeout(navigationLEDTimer);
-    // Navigation can trigger a local LED update in the controller/bridge.
-    // Repaint after it settles, reading the latest bank rather than a captured one.
-    invalidateButtonLEDs();
-    feedback();
-    navigationLEDTimer = setTimeout(() => {
-      if (!output) return;
-      invalidateButtonLEDs();
-      feedback();
-    }, 80);
-  }
-  function invalidateButtonLEDs() {
-    sent.delete('buttons');
-    for (const number of [...legacyUpperButtons, ...legacyLowerButtons]) sent.delete((144 + legacyChannel) * 128 + number);
-    for (let number = 37; number <= 52; number++) sent.delete(176 * 128 + number);
-  }
   let learned = {};
   try { learned = JSON.parse(localStorage.getItem('dimi-midi-v1')) || {}; } catch {}
 
@@ -776,7 +758,6 @@ function setupMIDI(actions) {
     try { localStorage.setItem('dimi-midi-v1', JSON.stringify(learned)); } catch {}
   }
   function detach() {
-    clearTimeout(navigationLEDTimer);
     binding++;
     if (active) active.onmidimessage = null;
     ledTest.disabled = true;
@@ -856,8 +837,7 @@ function setupMIDI(actions) {
       }
       actions.releasePad(key);
       if (action === 'shift') shifted = false;
-      if (action === 'previous' || action === 'next') refreshNavigationLEDs();
-      else feedback();
+      feedback();
       return;
     }
     if (action === 'shift') shifted = true;
@@ -871,7 +851,10 @@ function setupMIDI(actions) {
       ({ play: actions.transport, record: actions.toggleRecord, keys: actions.toggleKeys,
         pageUp: () => actions.page(1), pageDown: () => actions.page(-1),
         previous: () => actions.stepBank(-1), next: () => actions.stepBank(1) })[action]?.();
-      if (action === 'previous' || action === 'next') refreshNavigationLEDs();
+      if (action === 'previous' || action === 'next') {
+        sent.clear();
+        feedback();
+      }
     }
   }
   async function refresh() {
@@ -1057,10 +1040,10 @@ function setupMIDI(actions) {
         : (movingFader ? 60 : state.selected === i ? 63 : 13);
       const lowerColor = modern ? (state.steps[i] ? 21 : 0) : (state.steps[i] ? 60 : 12);
       const command = modern ? 176 : 144 + legacyChannel;
-      // Always send ordinary button feedback as well. Some mobile MIDI bridges
-      // report SysEx permission while silently dropping the outgoing packets.
-      send(command, upper[i], upperColor);
-      send(command, lower[i], lowerColor);
+      if (modern || !access.sysexEnabled) {
+        send(command, upper[i], upperColor);
+        send(command, lower[i], lowerColor);
+      }
       if (!modern && access.sysexEnabled) buttonLEDs.push(24 + i, upperColor, 32 + i, lowerColor);
     }
     const knobLEDs = [];
