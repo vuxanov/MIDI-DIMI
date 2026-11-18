@@ -87,7 +87,7 @@ button:active {background:var(--ink);color:var(--paper)}
   .step-bank {gap:2px}
   .step-bank .step {font-size:9px;overflow:hidden}
 }
-.step {min-height:31px;padding:0;font-size:12px}
+.step {min-height:44px;padding:0;font-size:12px}
 .step[aria-pressed=true] {background:var(--ink);color:var(--paper)}
 .step-mark {display:inline-block;width:10px;height:10px;border:1px solid;border-radius:50%}
 .step[aria-pressed=true] .step-mark {background:var(--paper)}
@@ -116,6 +116,7 @@ details p {max-width:78ch}
   .top-controls select {padding-right:22px;background-position:right 11px center,right 6px center}
   section {margin-top:6px}
   .section-head {margin-bottom:4px}
+  section[aria-label="Mixer"] .section-head {justify-content:flex-start}
   button,select,input[type=number] {min-height:25px;padding-block:1px}
   label {gap:4px}
   select,input[type=number] {font-size:16px}
@@ -139,7 +140,7 @@ details p {max-width:78ch}
   .piano-key {min-height:29px;padding:2px 0}
   #steps {gap:7px}
   .pattern-bar {gap:6px}
-  .step {min-height:29px}
+  .step {min-height:38px}
   .step-mark {width:8px;height:8px}
 }
 </style>
@@ -169,7 +170,6 @@ details p {max-width:78ch}
 <p id="playbackStatus" role="status" hidden></p>
 <section aria-label="Mixer">
 <div class="section-head">
-<div class="section-label"><h2>Mixer</h2></div>
 <div class="mixer-controls">
 <div id="pages" class="group" aria-label="Control page"><button data-page="0">Mix</button><button data-page="1">Sound</button><button data-page="2">Mod</button><button data-page="3" title="Envelope">Env</button><button data-page="4">Note</button></div>
 </div>
