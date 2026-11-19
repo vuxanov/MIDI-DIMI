@@ -198,12 +198,12 @@ details p {max-width:78ch}
 <p>MK1/MK2: select Factory template 1. XL 3: use the DAW input. Connect MIDI activates its DAW mode. If you use a custom mode, MIDI Learn can pick up the MIDI messages it sends. In Keys mode, configure custom buttons to send momentary messages.</p>
 <p id="midiActivity">No MIDI messages received.</p>
 <div class="setup-controls"><button id="testLED" type="button" disabled>Test lights</button><label>Input <select id="port"></select></label><label>LED output <select id="ledOutput"><option value="">Auto</option></select></label><label>Profile <select id="profile"><option value="legacy">XL MK1 / MK2</option><option value="xl3">XL 3</option></select></label><label>Control <select id="learnTarget"></select></label><button id="learn">Learn</button><button id="resetMap">Reset learned</button></div>
-<p>Upper MIDI buttons select tracks. Lower buttons edit eight steps or play notes in Keys mode. Track arrows move through the pattern eight steps at a time or shift the octave in Keys mode. Space plays or stops. A S D F G H J K mirror the lower row. Your session and learned controls save in this browser.</p></details>
+<p>Upper MIDI buttons select tracks. Lower buttons edit eight steps or play notes in Keys mode. Track arrows move through the pattern eight steps at a time or shift the octave in Keys mode. Cmd/Ctrl+Z undoes edits; Cmd/Ctrl+Shift+Z redoes them. Space plays or stops. A S D F G H J K mirror the lower row. Your session and learned controls save in this browser.</p></details>
 </main>
 <dialog id="deleteDialog" aria-labelledby="deleteTitle" aria-describedby="deleteDescription">
 <form method="dialog">
 <p id="deleteTitle">Delete everything?</p>
-<p id="deleteDescription">All notes and hits on every track will be deleted. This cannot be undone.</p>
+<p id="deleteDescription">All notes and hits on every track will be deleted. Use Cmd/Ctrl+Z to undo.</p>
 <div class="dialog-actions">
 <button value="cancel" autofocus>Cancel</button>
 <button id="confirmDelete" value="delete" class="primary">Delete everything</button>
@@ -1206,11 +1206,50 @@ for (const track of state.tracks) {
   if (!['lowpass', 'highpass'].includes(track.filterType)) track.filterType = 'lowpass';
 }
 let saveTimeout;
-function save() {
+const undoHistory = [];
+const redoHistory = [];
+let lastSavedState = JSON.stringify(state);
+let lastEditGroup, lastEditTime = 0, restoringHistory = false;
+function save(group) {
+  const snapshot = JSON.stringify(state);
+  if (!restoringHistory && snapshot !== lastSavedState) {
+    const now = Date.now();
+    if (!group || group !== lastEditGroup || now - lastEditTime > 500) {
+      undoHistory.push(lastSavedState);
+      if (undoHistory.length > 100) undoHistory.shift();
+    }
+    redoHistory.length = 0;
+    lastEditGroup = group;
+    lastEditTime = now;
+    lastSavedState = snapshot;
+  }
   clearTimeout(saveTimeout);
   saveTimeout = setTimeout(() => {
     try { localStorage.setItem('dimi-session-v1', JSON.stringify(state)); } catch {}
   }, 120);
+}
+function restoreEdit(redo = false) {
+  const source = redo ? redoHistory : undoHistory;
+  if (!source.length) return;
+  restoringHistory = true;
+  try {
+    releaseAll();
+    const snapshot = source.pop();
+    (redo ? undoHistory : redoHistory).push(lastSavedState);
+    state = JSON.parse(snapshot);
+    lastSavedState = snapshot;
+    lastEditGroup = undefined;
+    audio?.stopSequence();
+    chosen = clamp(chosen, 0, state.tracks[selected].length * 16 - 1);
+    bank = clamp(bank, 0, state.tracks[selected].length * 2 - 1);
+    $('tempo').value = state.tempo;
+    updateAudio();
+    renderMixer();
+    renderPattern();
+    save();
+  } finally {
+    restoringHistory = false;
+  }
 }
 
 let audio, timer, playing = false, recording = false, keys = false;
@@ -1409,7 +1448,7 @@ function setParam(index, name, value) {
   audio?.update(index, track, state.tempo);
   if (name === 'pitch' && keys) updateMixer();
   if (name === 'volume') playbackStatus();
-  save();
+  save('param-' + index + '-' + name);
 }
 function selectTrack(index) {
   releaseAll();
@@ -1762,6 +1801,12 @@ document.addEventListener('pointerdown', event => {
   if (!$('optionsMenu').contains(event.target)) $('optionsMenu').open = false;
 });
 document.addEventListener('keydown', event => {
+  if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === 'z') {
+    if (event.target.isContentEditable || event.target.matches('textarea,input:not([type=range])')) return;
+    event.preventDefault();
+    if (!event.repeat) restoreEdit(event.shiftKey);
+    return;
+  }
   if (event.key === 'Escape') {
     const menu = $('optionsMenu');
     if (menu.open) {
