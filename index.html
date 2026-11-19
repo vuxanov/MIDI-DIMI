@@ -459,7 +459,7 @@ class Audio {
   }
 
   hit(index, track, notes, time, gate, velocity = 1) {
-    if (this.voices.size >= 120) return () => {};
+    if (this.voices.size >= 120 && !(index === 7 && track.sampleId && track.sampleMode !== 'full')) return () => {};
     const ctx = this.ctx;
     const channel = this.channels[index];
     const amp = ctx.createGain();
@@ -468,6 +468,9 @@ class Audio {
     const drum = index < 4;
     const texture = index === 7;
     const sample = texture && Boolean(track.sampleId);
+    const sampleMode = track.sampleMode ?? 'restart';
+    if (sample && sampleMode !== 'full') notes = notes.slice(-1);
+    let nextSampleTrigger = Infinity;
     const peak = Math.max(.00012, voiceLevels[index] * velocity / Math.sqrt(notes.length));
     const pad = index === 6;
     const configuredAttack = drum ? .002 : attackTime(track.attack, index);
@@ -494,6 +497,11 @@ class Audio {
     if (texture && track.sampleId) {
       const buffer = this.samples.get(track.sampleId);
       if (!buffer) { amp.disconnect(); return () => {}; }
+      if (sampleMode !== 'full') for (const previous of this.voices) {
+        if (!previous.sample || previous.index !== index) continue;
+        if (previous.startTime <= time) previous.retriggerAt(time);
+        else nextSampleTrigger = Math.min(nextSampleTrigger, previous.startTime);
+      }
       for (const note of notes) {
         const source = ctx.createBufferSource();
         source.buffer = buffer;
@@ -542,15 +550,26 @@ class Audio {
     }
     const minimumLiveGate = Math.min(.12, attack + .025);
     let stopped = false;
+    let sampleCutoff = Infinity;
     const voice = {
-      index,
+      index, sample, startTime: time,
+      retriggerAt: at => {
+        if (!sample || at >= sampleCutoff) return;
+        sampleCutoff = at;
+        const end = Math.max(ctx.currentTime, at);
+        const fade = Math.max(ctx.currentTime, time, end - .004);
+        if (amp.gain.cancelAndHoldAtTime) amp.gain.cancelAndHoldAtTime(fade);
+        else { amp.gain.cancelScheduledValues(fade); amp.gain.setValueAtTime(peak, fade); }
+        amp.gain.linearRampToValueAtTime(.0001, end);
+        for (const source of sources) source.stop(end);
+      },
       scheduled: gate !== null || sample,
       retune: sample ? settings => sources.forEach((source, i) => {
         const rate = 2 ** ((notes[i] - (settings.sampleRoot ?? settings.notePitch ?? roots[7]) + (settings.sampleTranspose ?? 0)) / 12);
         source.playbackRate.setTargetAtTime(rate, ctx.currentTime, .015);
       }) : undefined,
       stop: (at, hard = false) => {
-        if (sample && !hard) return;
+        if (sample && sampleMode !== 'gate' && !hard) return;
         if (stopped && !hard) return;
         stopped = true;
         const earliest = gate === null && !drum ? minimumLiveGate : .006;
@@ -573,7 +592,9 @@ class Audio {
           }
           amp.gain.setTargetAtTime(.0001, end, hard ? .003 : release / 5);
         }
-        for (const source of sources) source.stop(end + (hard ? .014 : release));
+        const sourceEnd = Math.min(sampleCutoff, end + (hard ? .014 : release));
+        if (sample) sampleCutoff = sourceEnd;
+        for (const source of sources) source.stop(sourceEnd);
       }
     };
     this.voices.add(voice);
@@ -586,7 +607,8 @@ class Audio {
       };
       source.start(time);
     }
-    if (!sample && (drum || gate !== null)) voice.stop(time + (drum ? attack + hold + decay : gate));
+    if (sample && Number.isFinite(nextSampleTrigger)) voice.retriggerAt(nextSampleTrigger);
+    if ((!sample || sampleMode === 'gate') && (drum || gate !== null)) voice.stop(time + (drum ? attack + hold + decay : gate));
     return voice.stop;
   }
 
@@ -1240,6 +1262,8 @@ function setupMIDI(actions) {
 const $ = id => document.getElementById(id);
 const names = ['Kick', 'Clap', 'Hat', 'Metal', 'Bass', 'Stab', 'Pad', 'Texture'];
 const scale = [0, 2, 3, 5, 7, 8, 10, 12];
+const sampleModes = ['restart', 'full', 'gate'];
+const sampleModeLabels = ['Restart', 'Full', 'Gate'];
 const drumRoot = 36;
 const roots = [drumRoot, drumRoot, drumRoot, drumRoot, 33, 45, 45, 45];
 const pages = [
@@ -1255,6 +1279,7 @@ const availablePages = () => selected < 4 ? [0, 1, 4] : [0, 1, 2, 3, 4];
 const labels = { cutoff: 'Cutoff', delay: 'Delay', reverb: 'Reverb', resonance: 'Resonance',
   decay: 'Decay', character: 'Drive', rate: 'LFO rate', depth: 'LFO depth', attack: 'Attack', sustain: 'Sustain', release: 'Release', tuning: 'Tuning', velocity: 'Velocity', pitch: 'Pitch', duration: 'Length', patch: 'Sound' };
 function parameterLabel(name, index) {
+  if (name === 'duration' && index === 7 && state.tracks[7].sampleId) return 'Playback';
   if (name === 'character' && index >= 5) return 'Chorus';
   if (name === 'sustain' && index < 4) return 'Hold';
   return labels[name];
@@ -1374,7 +1399,7 @@ function normalizeSample(buffer) {
 }
 function samplePlaybackDefaults(track) {
   const root = track.notePitch ?? track.steps.find(Boolean)?.notes[0] ?? roots[7];
-  Object.assign(track, { sampleRoot: root, sampleTranspose: 0, samplePlaybackVersion: 1,
+  Object.assign(track, { sampleRoot: root, sampleTranspose: 0, samplePlaybackVersion: 1, sampleMode: 'restart',
     notePitch: root, octave: 0, filterType: 'lowpass', cutoff: 1, resonance: 0, depth: 0,
     delay: 0, reverb: 0, character: 0, attack: 0, sustain: 1, release: .08 });
 }
@@ -1415,6 +1440,7 @@ async function selectTextureSound(choice) {
       delete track.sampleName;
       delete track.sampleRoot;
       delete track.sampleTranspose;
+      delete track.sampleMode;
       delete track.samplePlaybackVersion;
       track.patch = choice.patch;
     }
@@ -1630,6 +1656,7 @@ function useTexture() {
   delete state.tracks[7].sampleName;
   delete state.tracks[7].sampleRoot;
   delete state.tracks[7].sampleTranspose;
+  delete state.tracks[7].sampleMode;
   delete state.tracks[7].samplePlaybackVersion;
   renderMixer();
   renderPattern();
@@ -1718,6 +1745,7 @@ function readProject(text) {
       track.sampleName = asset.name;
       if (source.samplePlaybackVersion === 1) {
         track.samplePlaybackVersion = 1;
+        track.sampleMode = sampleModes.includes(source.sampleMode) ? source.sampleMode : 'restart';
       }
     }
     track.steps = source.steps.map(step => {
@@ -1972,7 +2000,7 @@ function parameterValue(index, name) {
   if (name === 'tuning') return track.tuning ?? .5;
   if (name === 'velocity') return step?.velocity ?? track.noteVelocity ?? .82;
   if (index === 7 && track.sampleId && name === 'pitch') return ((track.sampleTranspose ?? 0) + 24) / 48;
-  if (index === 7 && track.sampleId && name === 'duration') return .5;
+  if (index === 7 && track.sampleId && name === 'duration') return Math.max(0, sampleModes.indexOf(track.sampleMode ?? 'restart')) / 2;
   if (name === 'pitch') return clamp(((step?.notes[0] ?? track.notePitch ?? roots[index]) - 24) / 72, 0, 1);
   if (name === 'duration') return noteLengthIndex(step?.gate ?? track.noteGate ?? defaultNoteLength(index)) / (noteLengths.length - 1);
   if (name === 'patch') return index === 7 ? textureSoundIndex() / (textureSoundChoices().length - 1) : track.patch / (patches[index].length - 1);
@@ -1986,8 +2014,9 @@ function setParam(index, name, value) {
     selectTextureSound(choices[Math.round(clamp(value, 0, 1) * (choices.length - 1))]);
     return;
   }
-  if (index === 7 && track.sampleId && name === 'duration') return;
-  if (index === 7 && track.sampleId && name === 'pitch') {
+  if (index === 7 && track.sampleId && name === 'duration') {
+    track.sampleMode = sampleModes[Math.round(clamp(value, 0, 1) * 2)];
+  } else if (index === 7 && track.sampleId && name === 'pitch') {
     track.sampleTranspose = Math.round(clamp(value, 0, 1) * 48) - 24;
   } else if (name === 'velocity') {
     track.noteVelocity = value;
@@ -2139,7 +2168,9 @@ function updateMixer() {
 
 function dialValue(input, index, name) {
   const value = parameterValue(index, name);
-  input.disabled = Boolean(index === 7 && name === 'duration' && state.tracks[7].sampleId);
+  input.disabled = false;
+  if (name === 'duration') input.step = index === 7 && state.tracks[7].sampleId ? .5 : 1 / (noteLengths.length - 1);
+  input.setAttribute('aria-label', names[index] + ' ' + parameterLabel(name, index));
   if (name === 'patch' && index === 7) input.step = 1 / (textureSoundChoices().length - 1);
   if (name === 'pitch') input.step = index === 7 && state.tracks[7].sampleId ? 1 / 48 : .001;
   input.value = value;
@@ -2155,7 +2186,7 @@ function dialValue(input, index, name) {
   if (name === 'pitch') display = index === 7 && state.tracks[7].sampleId
     ? ((state.tracks[7].sampleTranspose ?? 0) > 0 ? '+' : '') + (state.tracks[7].sampleTranspose ?? 0) + ' st'
     : noteName(noteStep(index)?.notes[0] ?? state.tracks[index].notePitch ?? roots[index]);
-  if (name === 'duration') display = index === 7 && state.tracks[7].sampleId ? 'Full' : noteLengthText(noteStep(index)?.gate ?? state.tracks[index].noteGate ?? defaultNoteLength(index));
+  if (name === 'duration') display = index === 7 && state.tracks[7].sampleId ? sampleModeLabels[Math.max(0, sampleModes.indexOf(state.tracks[7].sampleMode ?? 'restart'))] : noteLengthText(noteStep(index)?.gate ?? state.tracks[index].noteGate ?? defaultNoteLength(index));
   if (name === 'patch') display = index === 7 ? textureSoundChoices()[textureSoundIndex()].name : patches[index][state.tracks[index].patch];
   input.title = display;
   input.setAttribute('aria-valuetext', display);
@@ -2184,7 +2215,7 @@ function renderMixer() {
       const input = Object.assign(document.createElement('input'), {
         type: 'range', min: 0, max: 1, step: name === 'duration' ? 1 / (noteLengths.length - 1) : name === 'patch' ? 1 / (index === 7 ? textureSoundChoices().length - 1 : patches[index].length - 1) : .001
       });
-      input.disabled = Boolean(index === 7 && name === 'duration' && track.sampleId);
+      input.disabled = false;
       input.dataset.param = name;
       input.setAttribute('aria-label', names[index] + ' ' + (parameterLabel(name, index)));
       ring.append(input);
@@ -2565,7 +2596,7 @@ updateLights = setupMIDI({
   continuous: (type, index, row, raw, relative) => {
     const name = type === 'fader' ? 'volume' : trackControls(index)[row];
     const delta = name === 'pitch' && index === 7 && state.tracks[7].sampleId ? Math.sign(raw - 64) / 48
-      : name === 'duration' ? Math.sign(raw - 64) / (noteLengths.length - 1)
+      : name === 'duration' ? Math.sign(raw - 64) / (index === 7 && state.tracks[7].sampleId ? 2 : noteLengths.length - 1)
       : name === 'patch' ? Math.sign(raw - 64) / (index === 7 ? textureSoundChoices().length - 1 : patches[index].length - 1)
       : (raw - 64) / 100;
     const value = relative ? clamp(parameterValue(index, name) + delta, 0, 1) : raw / 127;
