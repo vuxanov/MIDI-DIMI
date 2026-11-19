@@ -20,6 +20,8 @@ Open **⋯** for **Save project** and **Open project**. Projects download as `.d
 
 Use the small arrow beside **Texture** to choose **Load sample…**, then select an audio file supported by your browser (for example WAV or MP3). Files must be under 8 MB and five minutes. The file replaces the generated Texture sound; its filename appears on the channel. The main button still selects the instrument.
 
+**Record microphone** in the same dropdown opens a recording dialog and asks for microphone permission. **Stop** loads the recording as the Texture sample; **Cancel** discards it. Recordings stop automatically after five minutes. Microphone audio is not monitored through the speakers. If a browser blocks microphone access for a local file, use the HTTPS app or localhost.
+
 The sample loops while a note is held, follows the channel's envelope/effects and Length setting, and is transposed by its played notes. A2 is the original sample speed. Choose **Use Texture** to return to the built-in sound. Loading a sample and returning to Texture can both be undone. The Sound variant knob is inactive while a sample is loaded.
 
 Samples are stored locally in this browser and embedded in saved `.dimi.json` project files so they can be reopened elsewhere. No audio is uploaded. If the browser cannot persist the sample, save a project file to retain it.
