@@ -50,6 +50,10 @@ label {display:inline-flex;align-items:center;gap:7px}
 .overflow-panel {position:absolute;right:0;top:calc(100% + 5px);z-index:10;display:grid;gap:4px;min-width:185px;padding:6px;border:1px solid;background:var(--paper)}
 .overflow:not([open]) .overflow-panel {display:none}
 .overflow-panel button {text-align:left;white-space:nowrap}
+.overflow-panel .shortcut-action {display:flex;justify-content:space-between;gap:24px}
+kbd {font:inherit;opacity:.6}
+.midi-send {display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px}
+.midi-send input[type=checkbox] {accent-color:var(--ink)}
 #keys,#record,#recordAudio {display:inline-flex;align-items:center;justify-content:center;gap:7px}
 .record-icon {display:block;flex:0 0 8px;width:8px;height:8px;border-radius:50%;background:currentColor}
 .record-icon.stop {border-radius:0}
@@ -163,6 +167,10 @@ details p {max-width:78ch}
 <summary aria-label="Options" title="Options">⋯</summary>
 <div class="overflow-panel">
 <button id="themeToggle" type="button" aria-pressed="false">☾ Dark mode</button>
+<button id="undoEdit" type="button" class="shortcut-action" disabled><span>Undo</span><kbd id="undoShortcut">Ctrl Z</kbd></button>
+<button id="redoEdit" type="button" class="shortcut-action" disabled><span>Redo</span><kbd id="redoShortcut">Ctrl Y</kbd></button>
+<button id="saveProject" type="button">Save project</button>
+<button id="openProject" type="button">Open project</button>
 <button id="resetActiveFX" type="button">Reset active instrument</button>
 <button id="resetFX" type="button">Reset all effects</button>
 <button id="resetBars" type="button">× Delete everything</button>
@@ -198,7 +206,10 @@ details p {max-width:78ch}
 <p>MK1/MK2: select Factory template 1. XL 3: use the DAW input. Connect MIDI activates its DAW mode. If you use a custom mode, MIDI Learn can pick up the MIDI messages it sends. In Keys mode, configure custom buttons to send momentary messages.</p>
 <p id="midiActivity">No MIDI messages received.</p>
 <div class="setup-controls"><button id="testLED" type="button" disabled>Test lights</button><label>Input <select id="port"></select></label><label>LED output <select id="ledOutput"><option value="">Auto</option></select></label><label>Profile <select id="profile"><option value="legacy">XL MK1 / MK2</option><option value="xl3">XL 3</option></select></label><label>Control <select id="learnTarget"></select></label><button id="learn">Learn</button><button id="resetMap">Reset learned</button></div>
-<p>Upper MIDI buttons select tracks. Lower buttons edit eight steps or play notes in Keys mode. Track arrows move through the pattern eight steps at a time or shift the octave in Keys mode. Cmd/Ctrl+Z undoes edits; Cmd/Ctrl+Shift+Z redoes them. Space plays or stops. A S D F G H J K mirror the lower row. Your session and learned controls save in this browser.</p></details>
+<div class="midi-send"><button id="connectOutput" type="button">Connect output</button><label>Send to <select id="performanceOutput"><option value="">Off</option></select></label><label><input id="sendNotes" type="checkbox" checked> Notes</label><label><input id="sendClock" type="checkbox" checked> Clock</label></div>
+<p>Output channels: Kick 1, Clap 2, Hat 3, Metal 4, Bass 5, Stab 6, Pad 7, Texture 8. MIDI DIMI sends tempo and transport; set the receiver to external MIDI clock.</p>
+<p>Upper MIDI buttons select tracks. Lower buttons edit eight steps or play notes in Keys mode. Track arrows move through the pattern eight steps at a time or shift the octave in Keys mode. Cmd/Ctrl+Z undoes edits; Cmd/Ctrl+Shift+Z or Ctrl+Y redoes them. Space plays or stops. A S D F G H J K mirror the lower row. Your session and learned controls save in this browser.</p></details>
+<input id="projectFile" type="file" accept=".json,.dimi,application/json" hidden>
 </main>
 <dialog id="deleteDialog" aria-labelledby="deleteTitle" aria-describedby="deleteDescription">
 <form method="dialog">
@@ -733,6 +744,115 @@ Object.assign(xl3, { '176:106': 'pageUp', '176:107': 'pageDown', '176:103': 'pre
 const relative = {};
 [77,85,93].forEach((start, row) => mapGroup(relative, 176, interval(start), 'knob', row));
 
+class MIDIStream {
+  constructor() {
+    this.channels = new Set();
+    this.volumes = new Map();
+    this.generation = 0;
+    const connect = $('connectOutput');
+    connect.onclick = async () => {
+      if (!navigator.requestMIDIAccess) return status('This browser does not support MIDI output.');
+      connect.disabled = true;
+      try {
+        this.access = await navigator.requestMIDIAccess();
+        this.access.addEventListener?.('statechange', () => this.refresh());
+        this.refresh();
+        status('');
+      } catch (error) {
+        status('MIDI output permission was denied.');
+      } finally {
+        connect.disabled = false;
+      }
+    };
+    $('performanceOutput').onchange = () => this.choose($('performanceOutput').value);
+    for (const id of ['sendNotes', 'sendClock']) $(id).onchange = () => {
+      this.stop();
+      if (playing) this.start(nextTime);
+    };
+    window.addEventListener('pagehide', () => this.stop());
+  }
+  refresh() {
+    const ports = [...(this.access?.outputs.values() || [])].filter(port => port.state !== 'disconnected' && !/launch control|lcxl|hui/i.test(port.name || ''));
+    const id = this.output?.id || '';
+    $('performanceOutput').replaceChildren(new Option('Off', ''), ...ports.map(port => new Option(port.name || port.id, port.id)));
+    $('performanceOutput').value = ports.some(port => port.id === id) ? id : '';
+    if (this.output && !ports.some(port => port.id === id)) {
+      this.stop();
+      this.output = undefined;
+    }
+  }
+  async choose(id) {
+    const generation = ++this.generation;
+    this.stop();
+    this.output = undefined;
+    const port = this.access?.outputs.get(id);
+    if (!port || /launch control|lcxl|hui/i.test(port.name || '')) return;
+    try {
+      await port.open?.();
+      if (generation !== this.generation) return;
+      this.output = port;
+      $('performanceOutput').value = port.id;
+      if (playing) this.start(nextTime);
+    } catch (error) {
+      $('performanceOutput').value = '';
+      status('Could not open MIDI output.');
+    }
+  }
+  timestamp(time) {
+    return performance.now() + Math.max(0, (time - (audio?.ctx.currentTime ?? time)) * 1000);
+  }
+  send(data, timestamp) {
+    if (!this.output) return;
+    try { this.output.send(data, timestamp); }
+    catch (error) { status('MIDI output failed. Reconnect output.'); }
+  }
+  start(time) {
+    this.volumes.clear();
+    if (this.output && $('sendClock').checked) {
+      this.send([250], this.timestamp(time));
+      this.clockRunning = true;
+    }
+  }
+  clock(time, sixteenth) {
+    if (!this.output || !$('sendClock').checked) return;
+    if (!this.clockRunning) this.start(time);
+    for (let pulse = 0; pulse < 6; pulse++) this.send([248], this.timestamp(time + pulse * sixteenth / 6));
+  }
+  volume(channel, value) {
+    if (!this.output || !$('sendNotes').checked) return;
+    const volume = Math.round(clamp(value, 0, 1) * 127);
+    if (this.volumes.get(channel) === volume) return;
+    this.send([176 + channel, 7, volume]);
+    this.volumes.set(channel, volume);
+    this.channels.add(channel);
+  }
+  note(channel, track, notes, time, gate, velocity) {
+    if (!this.output || !$('sendNotes').checked || velocity <= 0 || track.mute) return () => {};
+    const port = this.output;
+    this.channels.add(channel);
+    this.volume(channel, track.volume);
+    for (const note of notes) this.send([144 + channel, note, Math.max(1, Math.round(clamp(velocity, 0, 1) * 127))], this.timestamp(time));
+    const stop = end => {
+      if (this.output !== port) return;
+      for (const note of notes) this.send([128 + channel, note, 0], this.timestamp(end));
+    };
+    if (gate !== null) stop(time + gate);
+    return stop;
+  }
+  stop() {
+    if (!this.output) return;
+    try { this.output.clear?.(); } catch {}
+    if (this.clockRunning) this.send([252]);
+    for (const channel of this.channels) {
+      this.send([176 + channel, 123, 0]);
+      this.send([176 + channel, 120, 0]);
+    }
+    this.channels.clear();
+    this.volumes.clear();
+    this.clockRunning = false;
+  }
+}
+
 function setupMIDI(actions) {
   const button = document.getElementById('midi');
   const port = document.getElementById('port');
@@ -1223,11 +1343,76 @@ function save(group) {
     lastEditTime = now;
     lastSavedState = snapshot;
   }
+  updateHistoryButtons();
   clearTimeout(saveTimeout);
   saveTimeout = setTimeout(() => {
     try { localStorage.setItem('dimi-session-v1', JSON.stringify(state)); } catch {}
   }, 120);
 }
+function updateHistoryButtons() {
+  $('undoEdit').disabled = !undoHistory.length;
+  $('redoEdit').disabled = !redoHistory.length;
+}
+function projectContents() {
+  return JSON.stringify({ format: 'midi-dimi', version: 1, song: state }, null, 2);
+}
+function readProject(text) {
+  const project = JSON.parse(text);
+  if (project?.format !== 'midi-dimi' || project.version !== 1) throw new Error('Not a MIDI DIMI project.');
+  const song = project.song;
+  if (!song || !Number.isFinite(song.tempo) || song.tempo < 40 || song.tempo > 220 || !Array.isArray(song.tracks) || song.tracks.length !== 8) throw new Error('Invalid song data.');
+  const defaults = session('blank');
+  const tracks = song.tracks.map((source, i) => {
+    if (!source || ![1, 2, 4].includes(source.length) || !Array.isArray(source.steps) || source.steps.length !== 64) throw new Error('Invalid track data.');
+    const track = { ...defaults.tracks[i], length: source.length };
+    for (const name of ['volume', 'cutoff', 'delay', 'reverb', 'resonance', 'decay', 'character', 'attack', 'sustain', 'release', 'rate', 'depth', 'tuning', 'noteVelocity']) {
+      if (source[name] === undefined) continue;
+      if (!Number.isFinite(source[name]) || source[name] < 0 || source[name] > 1) throw new Error('Invalid instrument setting.');
+      track[name] = source[name];
+    }
+    for (const [name, low, high, integer] of [['patch', 0, patches[i].length - 1, true], ['notePitch', 0, 127, true], ['noteGate', .25, 64, false], ['octave', -2, 2, true]]) {
+      if (source[name] === undefined) continue;
+      const value = source[name];
+      if (!Number.isFinite(value) || value < low || value > high || (integer && !Number.isInteger(value))) throw new Error('Invalid note setting.');
+      track[name] = value;
+    }
+    track.filterType = ['lowpass', 'highpass'].includes(source.filterType) ? source.filterType : defaults.tracks[i].filterType;
+    track.mute = Boolean(source.mute);
+    track.steps = source.steps.map(step => {
+      if (step === null) return null;
+      if (!step || !Array.isArray(step.notes) || !step.notes.length || step.notes.length > 8 || step.notes.some(n => !Number.isInteger(n) || n < 0 || n > 127) || !Number.isFinite(step.gate) || step.gate < .25 || step.gate > 64 || !Number.isFinite(step.velocity) || step.velocity < 0 || step.velocity > 1) throw new Error('Invalid pattern data.');
+      return { notes: [...step.notes], gate: step.gate, velocity: step.velocity };
+    });
+    return track;
+  });
+  return { preset: typeof song.preset === 'string' ? song.preset : 'blank', tempo: song.tempo, tracks };
+}
+function loadProject(text) {
+  const song = readProject(text);
+  releaseAll();
+  midiStream.stop();
+  if (playing) {
+    playing = false;
+    clearInterval(timer);
+    $('play').textContent = '▶ Play';
+    pressed($('play'), false);
+  }
+  audio?.stopSequence();
+  audio?.resetEffects();
+  state = song;
+  queued = undefined;
+  chosen = 0;
+  bank = 0;
+  position = 0;
+  visibleStep = -1;
+  scheduled.length = 0;
+  $('tempo').value = state.tempo;
+  updateAudio();
+  renderMixer();
+  renderPattern();
+  save();
+}
+
 function restoreEdit(redo = false) {
   const source = redo ? redoHistory : undoHistory;
   if (!source.length) return;
@@ -1240,6 +1425,8 @@ function restoreEdit(redo = false) {
     lastSavedState = snapshot;
     lastEditGroup = undefined;
     audio?.stopSequence();
+    midiStream.stop();
+    if (playing) midiStream.start(nextTime);
     chosen = clamp(chosen, 0, state.tracks[selected].length * 16 - 1);
     bank = clamp(bank, 0, state.tracks[selected].length * 2 - 1);
     $('tempo').value = state.tempo;
@@ -1261,6 +1448,7 @@ const scheduled = [];
 const held = new Map();
 const launches = new Set();
 const stepTime = () => 15 / state.tempo;
+const midiStream = new MIDIStream();
 function status(message) {
   $('status').textContent = message;
   $('status').hidden = !message;
@@ -1292,9 +1480,13 @@ function tick() {
   while (nextTime < now + .08) {
     if (queued && position % 16 === 0) applyPreset(queued);
     scheduled.push({ time: nextTime, position });
+    midiStream.clock(nextTime, stepTime());
     state.tracks.forEach((track, index) => {
       const step = track.steps[position % (track.length * 16)];
-      if (step && !track.mute) audio.hit(index, track, step.notes, nextTime, step.gate * stepTime(), step.velocity);
+      if (step && !track.mute) {
+        audio.hit(index, track, step.notes, nextTime, step.gate * stepTime(), step.velocity);
+        midiStream.note(index, track, step.notes, nextTime, step.gate * stepTime(), step.velocity);
+      }
     });
     position++;
     nextTime += stepTime();
@@ -1330,6 +1522,7 @@ async function transport() {
   if (playing) {
     playing = false;
     clearInterval(timer);
+    midiStream.stop();
     try { audio.stopSequence(); } catch (error) { console.error(error); }
     scheduled.length = 0;
     visibleStep = -1;
@@ -1348,6 +1541,7 @@ async function transport() {
     playing = true;
     position = 0;
     nextTime = audio.ctx.currentTime + .04;
+    midiStream.start(nextTime);
     timer = setInterval(runTick, 22);
     requestAnimationFrame(animate);
     runTick();
@@ -1447,7 +1641,7 @@ function setParam(index, name, value) {
   }
   audio?.update(index, track, state.tempo);
   if (name === 'pitch' && keys) updateMixer();
-  if (name === 'volume') playbackStatus();
+  if (name === 'volume') { playbackStatus(); midiStream.volume(index, track.volume); }
   save('param-' + index + '-' + name);
 }
 function selectTrack(index) {
@@ -1507,7 +1701,9 @@ async function pressPad(i, key) {
   const note = keyNote(trackIndex, i);
   const velocity = .9;
   const now = audio.ctx.currentTime;
-  const stop = audio.hit(trackIndex, track, [note], now + .006, null, velocity);
+  const audioStop = audio.hit(trackIndex, track, [note], now + .006, null, velocity);
+  const midiStop = midiStream.note(trackIndex, track, [note], now + .006, null, velocity);
+  const stop = end => { audioStop(end); midiStop(end); };
   const record = recording && playing;
   const raw = position + (now - nextTime) / stepTime();
   const absolute = Math.max(0, Math.round(raw));
@@ -1801,10 +1997,10 @@ document.addEventListener('pointerdown', event => {
   if (!$('optionsMenu').contains(event.target)) $('optionsMenu').open = false;
 });
 document.addEventListener('keydown', event => {
-  if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === 'z') {
+  if ((event.metaKey || event.ctrlKey) && !event.altKey && (event.key.toLowerCase() === 'z' || (event.ctrlKey && event.key.toLowerCase() === 'y'))) {
     if (event.target.isContentEditable || event.target.matches('textarea,input:not([type=range])')) return;
     event.preventDefault();
-    if (!event.repeat) restoreEdit(event.shiftKey);
+    if (!event.repeat) restoreEdit(event.shiftKey || event.key.toLowerCase() === 'y');
     return;
   }
   if (event.key === 'Escape') {
@@ -1816,6 +2012,36 @@ document.addEventListener('keydown', event => {
   }
 });
 
+$('undoEdit').onclick = () => { $('optionsMenu').open = false; restoreEdit(); };
+$('redoEdit').onclick = () => { $('optionsMenu').open = false; restoreEdit(true); };
+if (/Mac|iPhone|iPad/.test(navigator.platform || '')) {
+  $('undoShortcut').textContent = '⌘ Z';
+  $('redoShortcut').textContent = '⇧ ⌘ Z';
+}
+updateHistoryButtons();
+$('saveProject').onclick = () => {
+  $('optionsMenu').open = false;
+  const url = URL.createObjectURL(new Blob([projectContents()], { type: 'application/json' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = 'MIDI DIMI ' + new Date().toISOString().replace(/[:.]/g, '-') + '.dimi.json';
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
+};
+$('openProject').onclick = () => { $('optionsMenu').open = false; $('projectFile').click(); };
+$('projectFile').onchange = async event => {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  try {
+    if (file.size > 2 * 1024 * 1024) throw new Error('Project file is too large.');
+    loadProject(await file.text());
+    status('');
+  } catch (error) {
+    status('Could not open project: ' + error.message);
+  } finally {
+    event.target.value = '';
+  }
+};
 $('play').onclick = transport;
 $('record').onclick = toggleRecord;
 $('recordAudio').onclick = toggleAudioRecording;
@@ -1837,6 +2063,8 @@ $('confirmDelete').onclick = () => {
   releaseAll();
   state.tracks.forEach(track => track.steps.fill(null));
   audio?.stopSequence();
+  midiStream.stop();
+  if (playing) midiStream.start(nextTime);
   $('optionsMenu').open = false;
   chosen = 0;
   bank = 0;
