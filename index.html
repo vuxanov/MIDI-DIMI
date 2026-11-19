@@ -86,7 +86,8 @@ kbd {font:inherit;opacity:.6}
 .dial::after {content:"";position:absolute;left:12px;top:3px;width:2px;height:8px;background:var(--ink);transform:rotate(var(--angle));transform-origin:50% 10px;pointer-events:none}
 .dial input {position:absolute;inset:0;width:100%;height:100%;margin:0;opacity:0;cursor:ns-resize;touch-action:none}
 .dial:focus-within {outline:2px dashed;outline-offset:2px}
-.knob {display:grid;gap:3px;font-size:11px;white-space:nowrap}
+.knob {display:grid;gap:3px;font-size:11px;white-space:nowrap;min-width:0;max-width:100%}
+.knob > span:not(.dial) {max-width:100%;overflow:hidden;text-overflow:ellipsis}
 .fader {writing-mode:vertical-lr;direction:rtl;width:24px;height:60px;accent-color:var(--ink)}
 #keyboard {display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:3px;margin-bottom:8px}
 #keyboard[hidden] {display:none}
@@ -426,6 +427,7 @@ class Audio {
     const channel = this.channels[index];
     const now = this.ctx.currentTime;
     const smooth = (parameter, value) => parameter.setTargetAtTime(value, now, .018);
+    if (index === 7 && track.sampleId) for (const voice of this.voices) if (voice.index === 7) voice.retune?.(track);
     if (this.tempo !== tempo) {
       smooth(this.effects.delay.delayTime, 60 / tempo * .75);
       this.tempo = tempo;
@@ -465,6 +467,7 @@ class Audio {
     const sources = [];
     const drum = index < 4;
     const texture = index === 7;
+    const sample = texture && Boolean(track.sampleId);
     const peak = Math.max(.00012, voiceLevels[index] * velocity / Math.sqrt(notes.length));
     const pad = index === 6;
     const configuredAttack = drum ? .002 : attackTime(track.attack, index);
@@ -495,7 +498,7 @@ class Audio {
         const source = ctx.createBufferSource();
         source.buffer = buffer;
         source.loop = false;
-        source.playbackRate.value = 2 ** ((note - (track.sampleRoot ?? track.notePitch ?? roots[7])) / 12);
+        source.playbackRate.value = 2 ** ((note - (track.sampleRoot ?? track.notePitch ?? roots[7]) + (track.sampleTranspose ?? 0)) / 12);
         source.connect(amp);
         sources.push(source);
       }
@@ -541,8 +544,13 @@ class Audio {
     let stopped = false;
     const voice = {
       index,
-      scheduled: gate !== null,
+      scheduled: gate !== null || sample,
+      retune: sample ? settings => sources.forEach((source, i) => {
+        const rate = 2 ** ((notes[i] - (settings.sampleRoot ?? settings.notePitch ?? roots[7]) + (settings.sampleTranspose ?? 0)) / 12);
+        source.playbackRate.setTargetAtTime(rate, ctx.currentTime, .015);
+      }) : undefined,
       stop: (at, hard = false) => {
+        if (sample && !hard) return;
         if (stopped && !hard) return;
         stopped = true;
         const earliest = gate === null && !drum ? minimumLiveGate : .006;
@@ -578,7 +586,7 @@ class Audio {
       };
       source.start(time);
     }
-    if (drum || gate !== null) voice.stop(time + (drum ? attack + hold + decay : gate));
+    if (!sample && (drum || gate !== null)) voice.stop(time + (drum ? attack + hold + decay : gate));
     return voice.stop;
   }
 
@@ -1366,10 +1374,59 @@ function normalizeSample(buffer) {
 }
 function samplePlaybackDefaults(track) {
   const root = track.notePitch ?? track.steps.find(Boolean)?.notes[0] ?? roots[7];
-  Object.assign(track, { sampleRoot: root, samplePlaybackVersion: 1,
+  Object.assign(track, { sampleRoot: root, sampleTranspose: 0, samplePlaybackVersion: 1,
     notePitch: root, octave: 0, filterType: 'lowpass', cutoff: 1, resonance: 0, depth: 0,
     delay: 0, reverb: 0, character: 0, attack: 0, sustain: 1, release: .08 });
 }
+let recentSamples = [];
+try {
+  const saved = JSON.parse(localStorage.getItem('dimi-recent-samples-v1'));
+  if (Array.isArray(saved)) recentSamples = saved.filter(item => item && typeof item.id === 'string' && typeof item.name === 'string').slice(0, 12);
+} catch {}
+let sampleSelectionGeneration = 0;
+function rememberSample(id, name) {
+  recentSamples = [{ id, name }, ...recentSamples.filter(item => item.id !== id)].slice(0, 12);
+  try { localStorage.setItem('dimi-recent-samples-v1', JSON.stringify(recentSamples)); } catch {}
+}
+function textureSoundChoices() {
+  const choices = [...patches[7].map((name, patch) => ({ name, patch })), ...recentSamples];
+  const track = state.tracks[7];
+  if (track.sampleId && !choices.some(choice => choice.id === track.sampleId)) choices.push({ id: track.sampleId, name: track.sampleName || 'Sample' });
+  return choices;
+}
+function textureSoundIndex() {
+  const track = state.tracks[7];
+  return track.sampleId ? Math.max(0, textureSoundChoices().findIndex(choice => choice.id === track.sampleId)) : track.patch;
+}
+async function selectTextureSound(choice) {
+  const generation = ++sampleSelectionGeneration;
+  const track = state.tracks[7];
+  if (choice.id === track.sampleId && choice.id) return;
+  try {
+    if (choice.id) {
+      await getSample(choice.id);
+      if (audio) await prepareSample(choice.id, audio);
+      if (generation !== sampleSelectionGeneration || state.tracks[7] !== track) return;
+      if (!track.sampleId) samplePlaybackDefaults(track);
+      track.sampleId = choice.id;
+      track.sampleName = choice.name;
+    } else {
+      delete track.sampleId;
+      delete track.sampleName;
+      delete track.sampleRoot;
+      delete track.sampleTranspose;
+      delete track.samplePlaybackVersion;
+      track.patch = choice.patch;
+    }
+    if (audio) {
+      for (const voice of audio.voices) if (voice.index === 7) voice.stop(audio.ctx.currentTime, true);
+      audio.update(7, track, state.tempo);
+    }
+    renderPattern();
+    save('param-7-patch');
+  } catch (error) { status('Could not load recent sample. Load the file again.'); }
+}
+
 const sampleAssets = new Map();
 let sampleDatabase;
 function sampleStore(mode, action) {
@@ -1391,6 +1448,24 @@ function sampleStore(mode, action) {
 function persistSample(id, asset) {
   return sampleStore('readwrite', store => store.put({ name: asset.name, data: asset.data }, id));
 }
+async function restoreRecentSamples() {
+  const found = [];
+  await sampleStore('readonly', store => {
+    const request = store.openCursor();
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (!cursor) return;
+      if (typeof cursor.key === 'string' && typeof cursor.value?.name === 'string' && !recentSamples.some(item => item.id === cursor.key)) found.push({ id: cursor.key, name: cursor.value.name });
+      if (recentSamples.length + found.length < 12) cursor.continue();
+    };
+    return request;
+  });
+  if (!found.length) return;
+  recentSamples = [...recentSamples, ...found.filter(item => !recentSamples.some(current => current.id === item.id))].slice(0, 12);
+  try { localStorage.setItem('dimi-recent-samples-v1', JSON.stringify(recentSamples)); } catch {}
+  renderMixer();
+}
+
 async function getSample(id) {
   if (!sampleAssets.has(id)) {
     const asset = await sampleStore('readonly', store => store.get(id));
@@ -1536,6 +1611,8 @@ async function loadSampleBytes(bytes, name, engine, targetTrack) {
   for (const voice of engine.voices) if (voice.index === 7) voice.stop(engine.ctx.currentTime, true);
   targetTrack.sampleId = id;
   targetTrack.sampleName = asset.name;
+  sampleSelectionGeneration++;
+  rememberSample(id, asset.name);
   samplePlaybackDefaults(targetTrack);
   engine.update(7, targetTrack, state.tempo);
   renderMixer();
@@ -1547,10 +1624,12 @@ async function loadSampleBytes(bytes, name, engine, targetTrack) {
 
 const textureName = () => state.tracks[7].sampleName || 'Texture';
 function useTexture() {
+  sampleSelectionGeneration++;
   if (audio) for (const voice of audio.voices) if (voice.index === 7) voice.stop(audio.ctx.currentTime, true);
   delete state.tracks[7].sampleId;
   delete state.tracks[7].sampleName;
   delete state.tracks[7].sampleRoot;
+  delete state.tracks[7].sampleTranspose;
   delete state.tracks[7].samplePlaybackVersion;
   renderMixer();
   renderPattern();
@@ -1571,6 +1650,7 @@ for (const track of state.tracks) {
   if (!['lowpass', 'highpass'].includes(track.filterType)) track.filterType = 'lowpass';
 }
 if (state.tracks[7].sampleId && !state.tracks[7].samplePlaybackVersion) samplePlaybackDefaults(state.tracks[7]);
+if (state.tracks[7].sampleId) rememberSample(state.tracks[7].sampleId, state.tracks[7].sampleName || 'Sample');
 let saveTimeout;
 const undoHistory = [];
 const redoHistory = [];
@@ -1623,7 +1703,7 @@ function readProject(text) {
       if (!Number.isFinite(source[name]) || source[name] < 0 || source[name] > 1) throw new Error('Invalid instrument setting.');
       track[name] = source[name];
     }
-    for (const [name, low, high, integer] of [['patch', 0, patches[i].length - 1, true], ['notePitch', 0, 127, true], ['noteGate', .25, 64, false], ['octave', -2, 2, true], ['sampleRoot', 0, 127, true]]) {
+    for (const [name, low, high, integer] of [['patch', 0, patches[i].length - 1, true], ['notePitch', 0, 127, true], ['noteGate', .25, 64, false], ['octave', -2, 2, true], ['sampleRoot', 0, 127, true], ['sampleTranspose', -24, 24, true]]) {
       if (source[name] === undefined) continue;
       const value = source[name];
       if (!Number.isFinite(value) || value < low || value > high || (integer && !Number.isInteger(value))) throw new Error('Invalid note setting.');
@@ -1652,10 +1732,12 @@ function readProject(text) {
 }
 function loadProject(text) {
   const song = readProject(text);
+  sampleSelectionGeneration++;
   const id = song.tracks[7].sampleId;
   if (id) {
     const asset = sampleFromProject(JSON.parse(text), id);
     sampleAssets.set(id, asset);
+    rememberSample(id, asset.name);
     persistSample(id, asset).catch(() => {});
   }
   releaseAll();
@@ -1689,6 +1771,7 @@ function restoreEdit(redo = false) {
   restoringHistory = true;
   try {
     releaseAll();
+    sampleSelectionGeneration++;
     const snapshot = source.pop();
     (redo ? undoHistory : redoHistory).push(lastSavedState);
     state = JSON.parse(snapshot);
@@ -1888,15 +1971,25 @@ function parameterValue(index, name) {
   const step = noteStep(index);
   if (name === 'tuning') return track.tuning ?? .5;
   if (name === 'velocity') return step?.velocity ?? track.noteVelocity ?? .82;
+  if (index === 7 && track.sampleId && name === 'pitch') return ((track.sampleTranspose ?? 0) + 24) / 48;
+  if (index === 7 && track.sampleId && name === 'duration') return .5;
   if (name === 'pitch') return clamp(((step?.notes[0] ?? track.notePitch ?? roots[index]) - 24) / 72, 0, 1);
   if (name === 'duration') return noteLengthIndex(step?.gate ?? track.noteGate ?? defaultNoteLength(index)) / (noteLengths.length - 1);
-  if (name === 'patch') return track.patch / (patches[index].length - 1);
+  if (name === 'patch') return index === 7 ? textureSoundIndex() / (textureSoundChoices().length - 1) : track.patch / (patches[index].length - 1);
   return track[name];
 }
 function setParam(index, name, value) {
   const track = state.tracks[index];
   const step = noteStep(index);
-  if (name === 'velocity') {
+  if (index === 7 && name === 'patch') {
+    const choices = textureSoundChoices();
+    selectTextureSound(choices[Math.round(clamp(value, 0, 1) * (choices.length - 1))]);
+    return;
+  }
+  if (index === 7 && track.sampleId && name === 'duration') return;
+  if (index === 7 && track.sampleId && name === 'pitch') {
+    track.sampleTranspose = Math.round(clamp(value, 0, 1) * 48) - 24;
+  } else if (name === 'velocity') {
     track.noteVelocity = value;
     if (step) step.velocity = value;
   } else if (name === 'pitch') {
@@ -2023,7 +2116,14 @@ function lower(i, active, key) {
 
 function updateMixer() {
   for (const [i, column] of [...$('mixer').children].entries()) {
-    pressed(column.querySelector('.track'), selected === i);
+    const trackButton = column.querySelector('.track');
+    pressed(trackButton, selected === i);
+    if (i === 7) {
+      trackButton.textContent = textureName();
+      trackButton.title = textureName();
+      const builtin = column.querySelector('.sample-builtin');
+      if (builtin) builtin.disabled = !state.tracks[7].sampleId;
+    }
   }
   if (keys) {
     for (const [i, key] of [...$('keyboard').children].entries()) {
@@ -2039,6 +2139,9 @@ function updateMixer() {
 
 function dialValue(input, index, name) {
   const value = parameterValue(index, name);
+  input.disabled = Boolean(index === 7 && name === 'duration' && state.tracks[7].sampleId);
+  if (name === 'patch' && index === 7) input.step = 1 / (textureSoundChoices().length - 1);
+  if (name === 'pitch') input.step = index === 7 && state.tracks[7].sampleId ? 1 / 48 : .001;
   input.value = value;
   input.parentElement.style.setProperty('--angle', `${Number(input.value) * 270 - 135}deg`);
   let display = Math.round(value * 100) + '%';
@@ -2049,9 +2152,11 @@ function dialValue(input, index, name) {
   if (name === 'release') display = releaseTime(value, index).toFixed(2) + ' s';
   if (name === 'tuning') display = (Math.round((value - .5) * 24) >= 0 ? '+' : '') + Math.round((value - .5) * 24) + ' st';
   if (name === 'decay' && index < 4) display = Math.round(drumDecayTime(value, index) * 1000) + ' ms';
-  if (name === 'pitch') display = noteName(noteStep(index)?.notes[0] ?? state.tracks[index].notePitch ?? roots[index]);
-  if (name === 'duration') display = noteLengthText(noteStep(index)?.gate ?? state.tracks[index].noteGate ?? defaultNoteLength(index));
-  if (name === 'patch') display = index === 7 && state.tracks[7].sampleId ? 'Sample' : patches[index][state.tracks[index].patch];
+  if (name === 'pitch') display = index === 7 && state.tracks[7].sampleId
+    ? ((state.tracks[7].sampleTranspose ?? 0) > 0 ? '+' : '') + (state.tracks[7].sampleTranspose ?? 0) + ' st'
+    : noteName(noteStep(index)?.notes[0] ?? state.tracks[index].notePitch ?? roots[index]);
+  if (name === 'duration') display = index === 7 && state.tracks[7].sampleId ? 'Full' : noteLengthText(noteStep(index)?.gate ?? state.tracks[index].noteGate ?? defaultNoteLength(index));
+  if (name === 'patch') display = index === 7 ? textureSoundChoices()[textureSoundIndex()].name : patches[index][state.tracks[index].patch];
   input.title = display;
   input.setAttribute('aria-valuetext', display);
   const caption = input.parentElement.nextElementSibling;
@@ -2077,9 +2182,9 @@ function renderMixer() {
       const ring = document.createElement('span');
       ring.className = 'dial';
       const input = Object.assign(document.createElement('input'), {
-        type: 'range', min: 0, max: 1, step: name === 'duration' ? 1 / (noteLengths.length - 1) : .001
+        type: 'range', min: 0, max: 1, step: name === 'duration' ? 1 / (noteLengths.length - 1) : name === 'patch' ? 1 / (index === 7 ? textureSoundChoices().length - 1 : patches[index].length - 1) : .001
       });
-      input.disabled = Boolean(index === 7 && name === 'patch' && track.sampleId);
+      input.disabled = Boolean(index === 7 && name === 'duration' && track.sampleId);
       input.dataset.param = name;
       input.setAttribute('aria-label', names[index] + ' ' + (parameterLabel(name, index)));
       ring.append(input);
@@ -2105,14 +2210,13 @@ function renderMixer() {
         event.preventDefault();
         input.focus({ preventScroll: true });
         input.setPointerCapture(event.pointerId);
-        drag = { id: event.pointerId, y: event.clientY };
+        drag = { id: event.pointerId, y: event.clientY, value: +input.value };
       };
       input.onpointermove = event => {
         if (drag?.id !== event.pointerId) return;
         const delta = drag.y - event.clientY;
         if (!delta) return;
-        drag.y = event.clientY;
-        input.value = clamp(+input.value + delta / 160, 0, 1);
+        input.value = clamp(drag.value + delta / 160, 0, 1);
         input.oninput();
       };
       input.onpointerup = input.onpointercancel = input.onlostpointercapture = event => {
@@ -2143,6 +2247,7 @@ function renderMixer() {
       items.append(button('Record microphone', () => { menu.open = false; recordMicrophone(); }));
       items.append(button('Load sample…', () => { menu.open = false; $('sampleFile').click(); }));
       const builtin = button('Use Texture', () => { menu.open = false; useTexture(); });
+      builtin.className = 'sample-builtin';
       builtin.disabled = !track.sampleId;
       items.append(builtin);
       menu.append(arrow, items);
@@ -2459,7 +2564,10 @@ updateLights = setupMIDI({
   },
   continuous: (type, index, row, raw, relative) => {
     const name = type === 'fader' ? 'volume' : trackControls(index)[row];
-    const delta = name === 'duration' ? Math.sign(raw - 64) / (noteLengths.length - 1) : (raw - 64) / 100;
+    const delta = name === 'pitch' && index === 7 && state.tracks[7].sampleId ? Math.sign(raw - 64) / 48
+      : name === 'duration' ? Math.sign(raw - 64) / (noteLengths.length - 1)
+      : name === 'patch' ? Math.sign(raw - 64) / (index === 7 ? textureSoundChoices().length - 1 : patches[index].length - 1)
+      : (raw - 64) / 100;
     const value = relative ? clamp(parameterValue(index, name) + delta, 0, 1) : raw / 127;
     setParam(index, name, value);
     revealChannel(index);
@@ -2469,6 +2577,7 @@ updateLights = setupMIDI({
     else dialValue(input, index, name);
   }
 });
+restoreRecentSamples().catch(() => {});
 </script>
 </body>
 </html>
