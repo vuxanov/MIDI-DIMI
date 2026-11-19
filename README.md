@@ -16,6 +16,14 @@ Open **⋯** for **Save project** and **Open project**. Projects download as `.d
 
 **Undo** and **Redo** appear below the theme option. Use Cmd/Ctrl+Z for Undo, Cmd+Shift+Z on Mac or Ctrl+Y / Ctrl+Shift+Z for Redo. The latest 100 song edits are kept until you reload. Continuous knob adjustments are grouped together.
 
+## Texture samples
+
+Use the small arrow beside **Texture** to choose **Load sample…**, then select an audio file supported by your browser (for example WAV or MP3). Files must be under 8 MB and five minutes. The file replaces the generated Texture sound; its filename appears on the channel. The main button still selects the instrument.
+
+The sample loops while a note is held, follows the channel's envelope/effects and Length setting, and is transposed by its played notes. A2 is the original sample speed. Choose **Use Texture** to return to the built-in sound. Loading a sample and returning to Texture can both be undone. The Sound variant knob is inactive while a sample is loaded.
+
+Samples are stored locally in this browser and embedded in saved `.dimi.json` project files so they can be reopened elsewhere. No audio is uploaded. If the browser cannot persist the sample, save a project file to retain it.
+
 ## Send notes and clock to Ableton or hardware
 
 1. Open **MIDI mapping & shortcuts**, click **Connect output**, and select a destination under **Send to**. Output is off until you select a port. Controller LED ports are excluded from this destination list.
