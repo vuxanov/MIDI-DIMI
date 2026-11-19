@@ -1152,7 +1152,7 @@ const noteLengthIndex = gate => noteLengths.reduce((best, value, index) =>
   Math.abs(Math.log2(gate / value)) < Math.abs(Math.log2(gate / noteLengths[best])) ? index : best, 0);
 const noteLengthText = gate => {
   const index = noteLengths.indexOf(gate);
-  return index >= 0 ? noteLengthLabels[index] : Number((gate / 4).toFixed(2)) + ' beats';
+  return index >= 0 ? noteLengthLabels[index] : Number((gate / 4).toFixed(2)) + ' bt';
 };
 const defaultEffects = { cutoff: .5, delay: 0, reverb: 0, resonance: 0, character: 0, depth: 0 };
 
@@ -1539,7 +1539,7 @@ function dialValue(input, index, name) {
   if (name === 'tuning') display = (Math.round((value - .5) * 24) >= 0 ? '+' : '') + Math.round((value - .5) * 24) + ' st';
   if (name === 'decay' && index < 4) display = Math.round(drumDecayTime(value, index) * 1000) + ' ms';
   if (name === 'pitch') display = noteName(noteStep(index)?.notes[0] ?? state.tracks[index].notePitch ?? roots[index]);
-  if (name === 'duration') display = 'Length ' + noteLengthText(noteStep(index)?.gate ?? state.tracks[index].noteGate ?? defaultNoteLength(index));
+  if (name === 'duration') display = noteLengthText(noteStep(index)?.gate ?? state.tracks[index].noteGate ?? defaultNoteLength(index));
   if (name === 'patch') display = patches[index][state.tracks[index].patch];
   input.title = display;
   input.setAttribute('aria-valuetext', display);
