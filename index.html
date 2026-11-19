@@ -1370,40 +1370,6 @@ function samplePlaybackDefaults(track) {
     notePitch: root, octave: 0, filterType: 'lowpass', cutoff: 1, resonance: 0, depth: 0,
     delay: 0, reverb: 0, character: 0, attack: 0, sustain: 1, release: .08 });
 }
-let samplePreview;
-function stopSamplePreview() {
-  if (!samplePreview) return;
-  const source = samplePreview;
-  samplePreview = undefined;
-  source.stop();
-}
-async function previewSample() {
-  if (samplePreview) { stopSamplePreview(); renderMixer(); return; }
-  try {
-    const id = state.tracks[7].sampleId;
-    if (!id) return;
-    if (playing) await transport();
-    releaseAll();
-    const engine = await startAudio();
-    for (const voice of engine.voices) voice.stop(engine.ctx.currentTime, true);
-    engine.resetEffects();
-    await prepareSample(id, engine);
-    if (state.tracks[7].sampleId !== id) return;
-    stopSamplePreview();
-    const source = engine.ctx.createBufferSource();
-    source.buffer = engine.samples.get(id);
-    source.playbackRate.value = 1;
-    source.connect(engine.master);
-    samplePreview = source;
-    source.onended = () => {
-      source.disconnect();
-      if (samplePreview === source) { samplePreview = undefined; renderMixer(); }
-    };
-    source.start();
-    renderMixer();
-  } catch (error) { status('Could not preview sample: ' + error.message); }
-}
-
 const sampleAssets = new Map();
 let sampleDatabase;
 function sampleStore(mode, action) {
@@ -1506,7 +1472,6 @@ async function recordMicrophone() {
     const engine = await startAudio();
     if (microphoneCapture !== capture) return;
     capture.engine = engine;
-    stopSamplePreview();
     capture.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
     if (microphoneCapture !== capture) { capture.stream.getTracks().forEach(track => track.stop()); return; }
     const mimeType = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/ogg;codecs=opus'].find(type => MediaRecorder.isTypeSupported(type));
@@ -1582,7 +1547,6 @@ async function loadSampleBytes(bytes, name, engine, targetTrack) {
 
 const textureName = () => state.tracks[7].sampleName || 'Texture';
 function useTexture() {
-  stopSamplePreview();
   if (audio) for (const voice of audio.voices) if (voice.index === 7) voice.stop(audio.ctx.currentTime, true);
   delete state.tracks[7].sampleId;
   delete state.tracks[7].sampleName;
@@ -1690,7 +1654,6 @@ function readProject(text) {
 }
 function loadProject(text) {
   const song = readProject(text);
-  stopSamplePreview();
   const id = song.tracks[7].sampleId;
   if (id) {
     const asset = sampleFromProject(JSON.parse(text), id);
@@ -1728,7 +1691,6 @@ function restoreEdit(redo = false) {
   restoringHistory = true;
   try {
     releaseAll();
-    stopSamplePreview();
     const snapshot = source.pop();
     (redo ? undoHistory : redoHistory).push(lastSavedState);
     state = JSON.parse(snapshot);
@@ -2180,9 +2142,6 @@ function renderMixer() {
       arrow.setAttribute('aria-label', 'Texture sound options');
       const items = document.createElement('div');
       items.className = 'sample-menu';
-      const preview = button(samplePreview ? 'Stop preview' : 'Preview sample', () => { menu.open = false; previewSample(); });
-      preview.disabled = !track.sampleId;
-      items.append(preview);
       const loop = button('Loop sample', () => { track.sampleLoop = !track.sampleLoop; menu.open = false; save(); renderMixer(); });
       pressed(loop, Boolean(track.sampleLoop));
       loop.disabled = !track.sampleId;
@@ -2377,7 +2336,7 @@ $('saveProject').onclick = async () => {
 $('stopMicrophone').onclick = () => stopMicrophone();
 $('cancelMicrophone').onclick = () => stopMicrophone(true);
 $('microphoneDialog').addEventListener('cancel', event => { event.preventDefault(); stopMicrophone(true); });
-window.addEventListener('pagehide', () => { stopMicrophone(true); stopSamplePreview(); });
+window.addEventListener('pagehide', () => stopMicrophone(true));
 $('sampleFile').onchange = async event => {
   const targetTrack = state.tracks[7];
   const file = event.target.files?.[0];
