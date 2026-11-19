@@ -188,6 +188,7 @@ details p {max-width:78ch}
 <button id="undoEdit" type="button" class="shortcut-action" disabled><span>Undo</span><kbd id="undoShortcut">Ctrl Z</kbd></button>
 <button id="redoEdit" type="button" class="shortcut-action" disabled><span>Redo</span><kbd id="redoShortcut">Ctrl Y</kbd></button>
 <button id="saveProject" type="button">Save project</button>
+<button id="exportMIDI" type="button">Export MIDI</button>
 <button id="openProject" type="button">Open project</button>
 <button id="resetActiveFX" type="button">Reset active instrument</button>
 <button id="resetFX" type="button">Reset all effects</button>
@@ -1735,6 +1736,56 @@ function updateHistoryButtons() {
   $('undoEdit').disabled = !undoHistory.length;
   $('redoEdit').disabled = !redoHistory.length;
 }
+// Standard MIDI File, format 1: tempo plus one named track per instrument.
+function midiFile(song) {
+  const ppq = 480, stepTicks = ppq / 4;
+  const endTick = Math.max(...song.tracks.map(track => track.length)) * 16 * stepTicks;
+  const textBytes = value => [...new TextEncoder().encode(value)];
+  const integer = (value, bytes) => Array.from({ length: bytes }, (_, i) => (value >>> ((bytes - i - 1) * 8)) & 255);
+  const variable = value => {
+    const bytes = [value & 127];
+    while ((value = Math.floor(value / 128)) > 0) bytes.unshift((value & 127) | 128);
+    return bytes;
+  };
+  const chunk = (name, data) => [...textBytes(name), ...integer(data.length, 4), ...data];
+  const trackChunk = (name, events, end) => {
+    const label = textBytes(name);
+    const bytes = [0, 255, 3, ...variable(label.length), ...label];
+    let previous = 0;
+    events.sort((a, b) => a.at - b.at || a.order - b.order);
+    for (const event of events) {
+      bytes.push(...variable(event.at - previous), ...event.bytes);
+      previous = event.at;
+    }
+    bytes.push(...variable(Math.max(end, previous) - previous), 255, 47, 0);
+    return chunk('MTrk', bytes);
+  };
+  const tempo = Math.round(60000000 / song.tempo);
+  const chunks = [trackChunk('Tempo', [
+    { at: 0, order: 0, bytes: [255, 81, 3, ...integer(tempo, 3)] },
+    { at: 0, order: 1, bytes: [255, 88, 4, 4, 2, 24, 8] }
+  ], endTick)];
+  song.tracks.forEach((track, channel) => {
+    const events = [];
+    // End a repeated pitch before retriggering it, preventing stuck/overlapping notes.
+    const active = new Map();
+    for (let at = 0; at < endTick; at += stepTicks) {
+      const step = track.steps[(at / stepTicks) % (track.length * 16)];
+      if (!step || step.velocity <= 0 || track.mute) continue;
+      for (const note of new Set(step.notes)) {
+        const prior = active.get(note);
+        if (prior && prior.at > at) prior.at = at;
+        events.push({ at, order: 1, bytes: [144 + channel, note, Math.max(1, Math.round(step.velocity * 127))] });
+        const off = { at: Math.min(endTick, at + Math.max(1, Math.round(step.gate * stepTicks))), order: 0, bytes: [128 + channel, note, 0] };
+        events.push(off);
+        active.set(note, off);
+      }
+    }
+    chunks.push(trackChunk(names[channel], events, endTick));
+  });
+  return new Uint8Array([...chunk('MThd', [...integer(1, 2), ...integer(chunks.length, 2), ...integer(ppq, 2)]), ...chunks.flat()]);
+}
+
 function projectContents() {
   const samples = Object.create(null);
   const id = state.tracks[7].sampleId;
@@ -2529,6 +2580,15 @@ if (/Mac|iPhone|iPad/.test(navigator.platform || '')) {
   $('redoShortcut').textContent = '⇧ ⌘ Z';
 }
 updateHistoryButtons();
+$('exportMIDI').onclick = () => {
+  $('optionsMenu').open = false;
+  const url = URL.createObjectURL(new Blob([midiFile(state)], { type: 'audio/midi' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = 'MIDI DIMI ' + new Date().toISOString().replace(/[:.]/g, '-') + '.mid';
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
+};
 $('saveProject').onclick = async () => {
   $('optionsMenu').open = false;
   try {
