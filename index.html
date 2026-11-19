@@ -11,6 +11,9 @@
 :root[data-theme="dark"] {--ink:#fff;--paper:#000;color-scheme:dark}
 * {box-sizing:border-box}
 body {margin:0}
+#mutedNotice {margin:10px 0 0;padding:7px 10px;border:1px solid;font-size:12px}
+#mutedNotice a {color:inherit;text-underline-offset:2px}
+#setup.revealed {display:block}
 dialog {max-width:min(360px,calc(100vw - 32px));padding:20px;border:1px solid var(--ink);color:var(--ink);background:var(--paper)}
 dialog::backdrop {background:rgba(0,0,0,.65)}
 dialog p {margin:0 0 16px}
@@ -194,6 +197,7 @@ details p {max-width:78ch}
 </div>
 </header>
 </div>
+<p id="mutedNotice" role="status" hidden>MIDI DIMI sound is muted. <a id="changeMuteSettings" href="#setup">Change</a></p>
 <p id="status" role="status" hidden></p>
 <p id="playbackStatus" role="status" hidden></p>
 <section aria-label="Mixer">
@@ -2503,8 +2507,18 @@ document.addEventListener('keydown', event => {
 });
 
 $('localSound').checked = !localSound;
+$('mutedNotice').hidden = localSound;
+$('changeMuteSettings').onclick = event => {
+  event.preventDefault();
+  const setup = $('setup');
+  setup.classList.add('revealed');
+  setup.open = true;
+  $('localSound').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  $('localSound').focus({ preventScroll: true });
+};
 $('localSound').onchange = () => {
   localSound = !$('localSound').checked;
+  $('mutedNotice').hidden = localSound;
   if (audio?.monitor) audio.monitor.gain.setTargetAtTime(localSound ? 1 : 0, audio.ctx.currentTime, .015);
   try { localStorage.setItem('dimi-local-sound', localSound ? 'on' : 'off'); } catch {}
 };
