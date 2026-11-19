@@ -494,7 +494,7 @@ class Audio {
       for (const note of notes) {
         const source = ctx.createBufferSource();
         source.buffer = buffer;
-        source.loop = Boolean(track.sampleLoop);
+        source.loop = false;
         source.playbackRate.value = 2 ** ((note - (track.sampleRoot ?? track.notePitch ?? roots[7])) / 12);
         source.connect(amp);
         sources.push(source);
@@ -1366,7 +1366,7 @@ function normalizeSample(buffer) {
 }
 function samplePlaybackDefaults(track) {
   const root = track.notePitch ?? track.steps.find(Boolean)?.notes[0] ?? roots[7];
-  Object.assign(track, { sampleRoot: root, samplePlaybackVersion: 1, sampleLoop: false,
+  Object.assign(track, { sampleRoot: root, samplePlaybackVersion: 1,
     notePitch: root, octave: 0, filterType: 'lowpass', cutoff: 1, resonance: 0, depth: 0,
     delay: 0, reverb: 0, character: 0, attack: 0, sustain: 1, release: .08 });
 }
@@ -1551,7 +1551,6 @@ function useTexture() {
   delete state.tracks[7].sampleId;
   delete state.tracks[7].sampleName;
   delete state.tracks[7].sampleRoot;
-  delete state.tracks[7].sampleLoop;
   delete state.tracks[7].samplePlaybackVersion;
   renderMixer();
   renderPattern();
@@ -1639,7 +1638,6 @@ function readProject(text) {
       track.sampleName = asset.name;
       if (source.samplePlaybackVersion === 1) {
         track.samplePlaybackVersion = 1;
-        track.sampleLoop = Boolean(source.sampleLoop);
       }
     }
     track.steps = source.steps.map(step => {
@@ -2142,10 +2140,6 @@ function renderMixer() {
       arrow.setAttribute('aria-label', 'Texture sound options');
       const items = document.createElement('div');
       items.className = 'sample-menu';
-      const loop = button('Loop sample', () => { track.sampleLoop = !track.sampleLoop; menu.open = false; save(); renderMixer(); });
-      pressed(loop, Boolean(track.sampleLoop));
-      loop.disabled = !track.sampleId;
-      items.append(loop);
       items.append(button('Record microphone', () => { menu.open = false; recordMicrophone(); }));
       items.append(button('Load sample…', () => { menu.open = false; $('sampleFile').click(); }));
       const builtin = button('Use Texture', () => { menu.open = false; useTexture(); });
