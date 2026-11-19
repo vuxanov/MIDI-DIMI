@@ -468,8 +468,9 @@ class Audio {
     const drum = index < 4;
     const texture = index === 7;
     const sample = texture && Boolean(track.sampleId);
-    const sampleMode = track.sampleMode ?? 'restart';
-    if (sample && sampleMode !== 'full') notes = notes.slice(-1);
+    const sampleMode = gate === null ? 'gate' : track.sampleMode === 'full' ? 'full' : 'restart';
+    if (sample) notes = notes.slice(-1);
+    let sampleDuration = 0, sampleRate = 1, samplePosition = 0, sampleTime = time;
     let nextSampleTrigger = Infinity;
     const peak = Math.max(.00012, voiceLevels[index] * velocity / Math.sqrt(notes.length));
     const pad = index === 6;
@@ -497,6 +498,14 @@ class Audio {
     if (texture && track.sampleId) {
       const buffer = this.samples.get(track.sampleId);
       if (!buffer) { amp.disconnect(); return () => {}; }
+      if (sampleMode === 'full' && [...this.voices].some(previous => previous.sample && previous.index === index && previous.activeAt(time))) {
+        amp.disconnect();
+        const ignored = () => {};
+        ignored.skipped = true;
+        return ignored;
+      }
+      sampleDuration = buffer.duration;
+      sampleRate = 2 ** ((notes[0] - (track.sampleRoot ?? track.notePitch ?? roots[7]) + (track.sampleTranspose ?? 0)) / 12);
       if (sampleMode !== 'full') for (const previous of this.voices) {
         if (!previous.sample || previous.index !== index) continue;
         if (previous.startTime <= time) previous.retriggerAt(time);
@@ -553,6 +562,7 @@ class Audio {
     let sampleCutoff = Infinity;
     const voice = {
       index, sample, startTime: time,
+      activeAt: at => sample && at >= time && at < Math.min(sampleCutoff, sampleTime + Math.max(0, sampleDuration - samplePosition) / sampleRate),
       retriggerAt: at => {
         if (!sample || at >= sampleCutoff) return;
         sampleCutoff = at;
@@ -564,10 +574,13 @@ class Audio {
         for (const source of sources) source.stop(end);
       },
       scheduled: gate !== null || sample,
-      retune: sample ? settings => sources.forEach((source, i) => {
-        const rate = 2 ** ((notes[i] - (settings.sampleRoot ?? settings.notePitch ?? roots[7]) + (settings.sampleTranspose ?? 0)) / 12);
-        source.playbackRate.setTargetAtTime(rate, ctx.currentTime, .015);
-      }) : undefined,
+      retune: sample ? settings => {
+        const now = Math.max(time, ctx.currentTime);
+        samplePosition += Math.max(0, now - sampleTime) * sampleRate;
+        sampleTime = now;
+        sampleRate = 2 ** ((notes[0] - (settings.sampleRoot ?? settings.notePitch ?? roots[7]) + (settings.sampleTranspose ?? 0)) / 12);
+        for (const source of sources) source.playbackRate.setTargetAtTime(sampleRate, ctx.currentTime, .015);
+      } : undefined,
       stop: (at, hard = false) => {
         if (sample && sampleMode !== 'gate' && !hard) return;
         if (stopped && !hard) return;
@@ -1262,8 +1275,8 @@ function setupMIDI(actions) {
 const $ = id => document.getElementById(id);
 const names = ['Kick', 'Clap', 'Hat', 'Metal', 'Bass', 'Stab', 'Pad', 'Texture'];
 const scale = [0, 2, 3, 5, 7, 8, 10, 12];
-const sampleModes = ['restart', 'full', 'gate'];
-const sampleModeLabels = ['Restart', 'Full', 'Gate'];
+const sampleModes = ['restart', 'full'];
+const sampleModeLabels = ['Restart', 'Full'];
 const drumRoot = 36;
 const roots = [drumRoot, drumRoot, drumRoot, drumRoot, 33, 45, 45, 45];
 const pages = [
@@ -1409,6 +1422,7 @@ try {
   if (Array.isArray(saved)) recentSamples = saved.filter(item => item && typeof item.id === 'string' && typeof item.name === 'string').slice(0, 12);
 } catch {}
 let sampleSelectionGeneration = 0;
+let pendingSampleTarget;
 function rememberSample(id, name) {
   recentSamples = [{ id, name }, ...recentSamples.filter(item => item.id !== id)].slice(0, 12);
   try { localStorage.setItem('dimi-recent-samples-v1', JSON.stringify(recentSamples)); } catch {}
@@ -1421,12 +1435,15 @@ function textureSoundChoices() {
 }
 function textureSoundIndex() {
   const track = state.tracks[7];
+  if (pendingSampleTarget?.generation === sampleSelectionGeneration && pendingSampleTarget.track === track) return textureSoundChoices().findIndex(choice => pendingSampleTarget.choice.id ? choice.id === pendingSampleTarget.choice.id : choice.patch === pendingSampleTarget.choice.patch);
   return track.sampleId ? Math.max(0, textureSoundChoices().findIndex(choice => choice.id === track.sampleId)) : track.patch;
 }
 async function selectTextureSound(choice) {
-  const generation = ++sampleSelectionGeneration;
   const track = state.tracks[7];
-  if (choice.id === track.sampleId && choice.id) return;
+  if (choice.id && pendingSampleTarget?.generation === sampleSelectionGeneration && pendingSampleTarget.track === track && pendingSampleTarget.choice.id === choice.id) return;
+  const generation = ++sampleSelectionGeneration;
+  if (choice.id === track.sampleId && choice.id) { pendingSampleTarget = undefined; return; }
+  pendingSampleTarget = { generation, track, choice };
   try {
     if (choice.id) {
       await getSample(choice.id);
@@ -1448,9 +1465,12 @@ async function selectTextureSound(choice) {
       for (const voice of audio.voices) if (voice.index === 7) voice.stop(audio.ctx.currentTime, true);
       audio.update(7, track, state.tempo);
     }
+    pendingSampleTarget = undefined;
     renderPattern();
     save('param-7-patch');
-  } catch (error) { status('Could not load recent sample. Load the file again.'); }
+  } catch (error) {
+    if (generation === sampleSelectionGeneration) { pendingSampleTarget = undefined; status('Could not load recent sample. Load the file again.'); }
+  }
 }
 
 const sampleAssets = new Map();
@@ -1871,8 +1891,8 @@ function tick() {
     state.tracks.forEach((track, index) => {
       const step = track.steps[position % (track.length * 16)];
       if (step && !track.mute) {
-        audio.hit(index, track, step.notes, nextTime, step.gate * stepTime(), step.velocity);
-        midiStream.note(index, track, step.notes, nextTime, step.gate * stepTime(), step.velocity);
+        const voice = audio.hit(index, track, step.notes, nextTime, step.gate * stepTime(), step.velocity);
+        if (!voice.skipped) midiStream.note(index, track, step.notes, nextTime, step.gate * stepTime(), step.velocity);
       }
     });
     position++;
@@ -1994,13 +2014,40 @@ function noteStep(index) {
   const steps = track.steps.slice(0, track.length * 16);
   return steps[Math.min(chosen, steps.length - 1)] || steps.find(Boolean);
 }
+function discreteParameterCount(index, name) {
+  if (name === 'patch') return index === 7 ? textureSoundChoices().length : patches[index].length;
+  if (name === 'duration') return index === 7 && state.tracks[7].sampleId ? sampleModes.length : noteLengths.length;
+  return 0;
+}
+const midiKnobMotion = new Map();
+function midiParameterValue(index, row, name, raw, relative) {
+  const current = parameterValue(index, name);
+  const count = discreteParameterCount(index, name);
+  const key = row + ':' + index;
+  const previous = midiKnobMotion.get(key);
+  const motion = { raw, name, remainder: previous?.name === name ? previous.remainder : 0 };
+  midiKnobMotion.set(key, motion);
+  if (!count) return relative ? clamp(current + (name === 'pitch' && index === 7 && state.tracks[7].sampleId ? Math.sign(raw - 64) / 48 : (raw - 64) / 100), 0, 1) : raw / 127;
+  let steps;
+  if (relative) steps = Math.sign(raw - 64);
+  else {
+    if (!previous) return current;
+    const delta = raw - previous.raw;
+    if (delta && Math.sign(delta) !== Math.sign(motion.remainder)) motion.remainder = 0;
+    motion.remainder += delta;
+    steps = Math.trunc(motion.remainder / 4);
+    motion.remainder -= steps * 4;
+  }
+  return clamp(Math.round(current * (count - 1)) + steps, 0, count - 1) / (count - 1);
+}
+
 function parameterValue(index, name) {
   const track = state.tracks[index];
   const step = noteStep(index);
   if (name === 'tuning') return track.tuning ?? .5;
   if (name === 'velocity') return step?.velocity ?? track.noteVelocity ?? .82;
   if (index === 7 && track.sampleId && name === 'pitch') return ((track.sampleTranspose ?? 0) + 24) / 48;
-  if (index === 7 && track.sampleId && name === 'duration') return Math.max(0, sampleModes.indexOf(track.sampleMode ?? 'restart')) / 2;
+  if (index === 7 && track.sampleId && name === 'duration') return Math.max(0, sampleModes.indexOf(track.sampleMode ?? 'restart')) / (sampleModes.length - 1);
   if (name === 'pitch') return clamp(((step?.notes[0] ?? track.notePitch ?? roots[index]) - 24) / 72, 0, 1);
   if (name === 'duration') return noteLengthIndex(step?.gate ?? track.noteGate ?? defaultNoteLength(index)) / (noteLengths.length - 1);
   if (name === 'patch') return index === 7 ? textureSoundIndex() / (textureSoundChoices().length - 1) : track.patch / (patches[index].length - 1);
@@ -2015,7 +2062,7 @@ function setParam(index, name, value) {
     return;
   }
   if (index === 7 && track.sampleId && name === 'duration') {
-    track.sampleMode = sampleModes[Math.round(clamp(value, 0, 1) * 2)];
+    track.sampleMode = sampleModes[Math.round(clamp(value, 0, 1) * (sampleModes.length - 1))];
   } else if (index === 7 && track.sampleId && name === 'pitch') {
     track.sampleTranspose = Math.round(clamp(value, 0, 1) * 48) - 24;
   } else if (name === 'velocity') {
@@ -2169,7 +2216,7 @@ function updateMixer() {
 function dialValue(input, index, name) {
   const value = parameterValue(index, name);
   input.disabled = false;
-  if (name === 'duration') input.step = index === 7 && state.tracks[7].sampleId ? .5 : 1 / (noteLengths.length - 1);
+  if (name === 'duration') input.step = index === 7 && state.tracks[7].sampleId ? 1 / (sampleModes.length - 1) : 1 / (noteLengths.length - 1);
   input.setAttribute('aria-label', names[index] + ' ' + parameterLabel(name, index));
   if (name === 'patch' && index === 7) input.step = 1 / (textureSoundChoices().length - 1);
   if (name === 'pitch') input.step = index === 7 && state.tracks[7].sampleId ? 1 / 48 : .001;
@@ -2247,7 +2294,13 @@ function renderMixer() {
         if (drag?.id !== event.pointerId) return;
         const delta = drag.y - event.clientY;
         if (!delta) return;
-        input.value = clamp(drag.value + delta / 160, 0, 1);
+        const count = discreteParameterCount(index, name);
+        if (count) {
+          const steps = Math.trunc(delta / 8);
+          if (!steps) return;
+          drag.y -= steps * 8;
+          input.value = clamp(parameterValue(index, name) + steps / (count - 1), 0, 1);
+        } else input.value = clamp(drag.value + delta / 160, 0, 1);
         input.oninput();
       };
       input.onpointerup = input.onpointercancel = input.onlostpointercapture = event => {
@@ -2595,11 +2648,7 @@ updateLights = setupMIDI({
   },
   continuous: (type, index, row, raw, relative) => {
     const name = type === 'fader' ? 'volume' : trackControls(index)[row];
-    const delta = name === 'pitch' && index === 7 && state.tracks[7].sampleId ? Math.sign(raw - 64) / 48
-      : name === 'duration' ? Math.sign(raw - 64) / (index === 7 && state.tracks[7].sampleId ? 2 : noteLengths.length - 1)
-      : name === 'patch' ? Math.sign(raw - 64) / (index === 7 ? textureSoundChoices().length - 1 : patches[index].length - 1)
-      : (raw - 64) / 100;
-    const value = relative ? clamp(parameterValue(index, name) + delta, 0, 1) : raw / 127;
+    const value = type === 'knob' ? midiParameterValue(index, row, name, raw, relative) : raw / 127;
     setParam(index, name, value);
     revealChannel(index);
     touchControl(type === 'fader' ? -1 : row, index);
