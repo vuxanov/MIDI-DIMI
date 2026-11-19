@@ -1090,7 +1090,7 @@ function trackControls(index) {
 }
 const availablePages = () => selected < 4 ? [0, 1, 4] : [0, 1, 2, 3, 4];
 const labels = { cutoff: 'Cutoff', delay: 'Delay', reverb: 'Reverb', resonance: 'Resonance',
-  decay: 'Decay', character: 'Drive', rate: 'LFO rate', depth: 'LFO depth', attack: 'Attack', sustain: 'Sustain', release: 'Release', tuning: 'Tuning', velocity: 'Velocity', pitch: 'Pitch', duration: 'Duration', patch: 'Sound' };
+  decay: 'Decay', character: 'Drive', rate: 'LFO rate', depth: 'LFO depth', attack: 'Attack', sustain: 'Sustain', release: 'Release', tuning: 'Tuning', velocity: 'Velocity', pitch: 'Pitch', duration: 'Length', patch: 'Sound' };
 function parameterLabel(name, index) {
   if (name === 'character' && index >= 5) return 'Chorus';
   if (name === 'sustain' && index < 4) return 'Hold';
@@ -1145,6 +1145,15 @@ function hypnoticSession(tracks) {
   ];
 }
 
+const noteLengths = [1, 2, 4, 8, 16, 32, 64];
+const noteLengthLabels = ['1/16', '1/8', '1/4', '1/2', '1 bar', '2 bars', '4 bars'];
+const defaultNoteLength = index => [1, 1, 1, 1, 2, 1, 16, 32][index];
+const noteLengthIndex = gate => noteLengths.reduce((best, value, index) =>
+  Math.abs(Math.log2(gate / value)) < Math.abs(Math.log2(gate / noteLengths[best])) ? index : best, 0);
+const noteLengthText = gate => {
+  const index = noteLengths.indexOf(gate);
+  return index >= 0 ? noteLengthLabels[index] : Number((gate / 4).toFixed(2)) + ' beats';
+};
 const defaultEffects = { cutoff: .5, delay: 0, reverb: 0, resonance: 0, character: 0, depth: 0 };
 
 function session(preset) {
@@ -1152,7 +1161,7 @@ function session(preset) {
   const hypnotic = preset === 'hypnotic';
   const tracks = names.map((_, i) => ({
     length: i >= 6 ? 4 : i >= 4 ? 2 : 1, steps: Array(64).fill(null), patch: 0, tuning: .5,
-    filterType: defaultFilterTypes[i],
+    filterType: defaultFilterTypes[i], noteGate: defaultNoteLength(i),
     volume: [.86,.56,.49,.43,.63,.49,.57,.38][i], mute: false,
     cutoff: [.7,.86,.96,.75,.54,.65,.68,.57][i], delay: [0,.10,.05,.23,.07,.32,.25,.2][i],
     reverb: [0,.15,.12,.27,.04,.27,.47,.52][i], resonance: i === 4 ? .18 : .04,
@@ -1371,7 +1380,7 @@ function parameterValue(index, name) {
   if (name === 'tuning') return track.tuning ?? .5;
   if (name === 'velocity') return step?.velocity ?? track.noteVelocity ?? .82;
   if (name === 'pitch') return clamp(((step?.notes[0] ?? track.notePitch ?? roots[index]) - 24) / 72, 0, 1);
-  if (name === 'duration') return clamp(((step?.gate ?? track.noteGate ?? 1) - .25) / 15.75, 0, 1);
+  if (name === 'duration') return noteLengthIndex(step?.gate ?? track.noteGate ?? defaultNoteLength(index)) / (noteLengths.length - 1);
   if (name === 'patch') return track.patch / (patches[index].length - 1);
   return track[name];
 }
@@ -1389,7 +1398,7 @@ function setParam(index, name, value) {
       step.notes = step.notes.map(note => clamp(note + delta, 0, 127));
     }
   } else if (name === 'duration') {
-    const duration = Math.round((.25 + value * 15.75) * 4) / 4;
+    const duration = noteLengths[Math.round(clamp(value, 0, 1) * (noteLengths.length - 1))];
     track.noteGate = duration;
     if (step) step.gate = duration;
   } else if (name === 'patch') {
@@ -1530,7 +1539,7 @@ function dialValue(input, index, name) {
   if (name === 'tuning') display = (Math.round((value - .5) * 24) >= 0 ? '+' : '') + Math.round((value - .5) * 24) + ' st';
   if (name === 'decay' && index < 4) display = Math.round(drumDecayTime(value, index) * 1000) + ' ms';
   if (name === 'pitch') display = noteName(noteStep(index)?.notes[0] ?? state.tracks[index].notePitch ?? roots[index]);
-  if (name === 'duration') display = (noteStep(index)?.gate ?? state.tracks[index].noteGate ?? 1) + ' × 1/16';
+  if (name === 'duration') display = 'Length ' + noteLengthText(noteStep(index)?.gate ?? state.tracks[index].noteGate ?? defaultNoteLength(index));
   if (name === 'patch') display = patches[index][state.tracks[index].patch];
   input.title = display;
   input.setAttribute('aria-valuetext', display);
@@ -1557,7 +1566,7 @@ function renderMixer() {
       const ring = document.createElement('span');
       ring.className = 'dial';
       const input = Object.assign(document.createElement('input'), {
-        type: 'range', min: 0, max: 1, step: .001
+        type: 'range', min: 0, max: 1, step: name === 'duration' ? 1 / (noteLengths.length - 1) : .001
       });
       input.dataset.param = name;
       input.setAttribute('aria-label', names[index] + ' ' + (parameterLabel(name, index)));
@@ -1637,7 +1646,7 @@ function toggleStep(index) {
   const track = state.tracks[selected];
   chosen = index;
   bank = Math.floor(index / 8);
-  track.steps[index] = track.steps[index] ? null : { notes: [track.notePitch ?? roots[selected]], gate: track.noteGate ?? 1, velocity: track.noteVelocity ?? .82 };
+  track.steps[index] = track.steps[index] ? null : { notes: [track.notePitch ?? roots[selected]], gate: track.noteGate ?? defaultNoteLength(selected), velocity: track.noteVelocity ?? .82 };
   save();
   renderPattern();
 }
@@ -1795,11 +1804,11 @@ $('resetActiveFX').onclick = () => {
   const track = state.tracks[selected];
   const defaults = session('blank').tracks[selected];
   const steps = track.steps.map(step => step ? {
-    notes: [roots[selected]], gate: 1, velocity: .82
+    notes: [roots[selected]], gate: defaults.noteGate, velocity: .82
   } : null);
   state.tracks[selected] = {
     ...defaults, length: track.length, steps, octave: 0,
-    notePitch: roots[selected], noteGate: 1, noteVelocity: .82
+    notePitch: roots[selected], noteGate: defaults.noteGate, noteVelocity: .82
   };
   audio?.update(selected, state.tracks[selected], state.tempo);
   renderMixer();
@@ -1860,7 +1869,8 @@ updateLights = setupMIDI({
   },
   continuous: (type, index, row, raw, relative) => {
     const name = type === 'fader' ? 'volume' : trackControls(index)[row];
-    const value = relative ? clamp(parameterValue(index, name) + (raw - 64) / 100, 0, 1) : raw / 127;
+    const delta = name === 'duration' ? Math.sign(raw - 64) / (noteLengths.length - 1) : (raw - 64) / 100;
+    const value = relative ? clamp(parameterValue(index, name) + delta, 0, 1) : raw / 127;
     setParam(index, name, value);
     revealChannel(index);
     touchControl(type === 'fader' ? -1 : row, index);
