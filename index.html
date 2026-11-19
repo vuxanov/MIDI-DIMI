@@ -494,8 +494,8 @@ class Audio {
       for (const note of notes) {
         const source = ctx.createBufferSource();
         source.buffer = buffer;
-        source.loop = true;
-        source.playbackRate.value = 2 ** ((note - roots[7]) / 12);
+        source.loop = Boolean(track.sampleLoop);
+        source.playbackRate.value = 2 ** ((note - (track.sampleRoot ?? track.notePitch ?? roots[7])) / 12);
         source.connect(amp);
         sources.push(source);
       }
@@ -1352,6 +1352,58 @@ function session(preset) {
   return { preset, tempo: ambient ? 86 : hypnotic ? 132 : 128, tracks };
 }
 
+function normalizeSample(buffer) {
+  let peak = 0;
+  for (let channel = 0; channel < buffer.numberOfChannels; channel++) {
+    for (const value of buffer.getChannelData(channel)) peak = Math.max(peak, Math.abs(value));
+  }
+  const gain = peak > .0001 ? Math.min(8, .8 / peak) : 1;
+  for (let channel = 0; channel < buffer.numberOfChannels; channel++) {
+    const samples = buffer.getChannelData(channel);
+    for (let i = 0; i < samples.length; i++) samples[i] *= gain;
+  }
+  return buffer;
+}
+function samplePlaybackDefaults(track) {
+  const root = track.notePitch ?? track.steps.find(Boolean)?.notes[0] ?? roots[7];
+  Object.assign(track, { sampleRoot: root, samplePlaybackVersion: 1, sampleLoop: false,
+    notePitch: root, octave: 0, filterType: 'lowpass', cutoff: 1, resonance: 0, depth: 0,
+    delay: 0, reverb: 0, character: 0, attack: 0, sustain: 1, release: .08 });
+}
+let samplePreview;
+function stopSamplePreview() {
+  if (!samplePreview) return;
+  const source = samplePreview;
+  samplePreview = undefined;
+  source.stop();
+}
+async function previewSample() {
+  if (samplePreview) { stopSamplePreview(); renderMixer(); return; }
+  try {
+    const id = state.tracks[7].sampleId;
+    if (!id) return;
+    if (playing) await transport();
+    releaseAll();
+    const engine = await startAudio();
+    for (const voice of engine.voices) voice.stop(engine.ctx.currentTime, true);
+    engine.resetEffects();
+    await prepareSample(id, engine);
+    if (state.tracks[7].sampleId !== id) return;
+    stopSamplePreview();
+    const source = engine.ctx.createBufferSource();
+    source.buffer = engine.samples.get(id);
+    source.playbackRate.value = 1;
+    source.connect(engine.master);
+    samplePreview = source;
+    source.onended = () => {
+      source.disconnect();
+      if (samplePreview === source) { samplePreview = undefined; renderMixer(); }
+    };
+    source.start();
+    renderMixer();
+  } catch (error) { status('Could not preview sample: ' + error.message); }
+}
+
 const sampleAssets = new Map();
 let sampleDatabase;
 function sampleStore(mode, action) {
@@ -1385,7 +1437,7 @@ async function prepareSample(id, engine) {
   const asset = await getSample(id);
   if (!asset.buffer) {
     const bytes = Uint8Array.from(atob(asset.data), character => character.charCodeAt(0));
-    asset.buffer = await engine.ctx.decodeAudioData(bytes.buffer);
+    asset.buffer = normalizeSample(await engine.ctx.decodeAudioData(bytes.buffer));
   }
   engine.samples.set(id, asset.buffer);
 }
@@ -1454,6 +1506,7 @@ async function recordMicrophone() {
     const engine = await startAudio();
     if (microphoneCapture !== capture) return;
     capture.engine = engine;
+    stopSamplePreview();
     capture.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
     if (microphoneCapture !== capture) { capture.stream.getTracks().forEach(track => track.stop()); return; }
     const mimeType = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/ogg;codecs=opus'].find(type => MediaRecorder.isTypeSupported(type));
@@ -1506,7 +1559,7 @@ async function recordMicrophone() {
 }
 async function loadSampleBytes(bytes, name, engine, targetTrack) {
   if (!bytes.length || bytes.length > 8 * 1024 * 1024) throw new Error('Choose audio under 8 MB.');
-  const buffer = await engine.ctx.decodeAudioData(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+  const buffer = normalizeSample(await engine.ctx.decodeAudioData(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)));
   if (!buffer.length || buffer.duration > 300) throw new Error('Choose a sample under five minutes.');
   if (state.tracks[7] !== targetTrack) return;
   let binary = '';
@@ -1518,6 +1571,8 @@ async function loadSampleBytes(bytes, name, engine, targetTrack) {
   for (const voice of engine.voices) if (voice.index === 7) voice.stop(engine.ctx.currentTime, true);
   targetTrack.sampleId = id;
   targetTrack.sampleName = asset.name;
+  samplePlaybackDefaults(targetTrack);
+  engine.update(7, targetTrack, state.tempo);
   renderMixer();
   renderPattern();
   save();
@@ -1527,9 +1582,13 @@ async function loadSampleBytes(bytes, name, engine, targetTrack) {
 
 const textureName = () => state.tracks[7].sampleName || 'Texture';
 function useTexture() {
+  stopSamplePreview();
   if (audio) for (const voice of audio.voices) if (voice.index === 7) voice.stop(audio.ctx.currentTime, true);
   delete state.tracks[7].sampleId;
   delete state.tracks[7].sampleName;
+  delete state.tracks[7].sampleRoot;
+  delete state.tracks[7].sampleLoop;
+  delete state.tracks[7].samplePlaybackVersion;
   renderMixer();
   renderPattern();
   save();
@@ -1548,6 +1607,7 @@ try {
 for (const track of state.tracks) {
   if (!['lowpass', 'highpass'].includes(track.filterType)) track.filterType = 'lowpass';
 }
+if (state.tracks[7].sampleId && !state.tracks[7].samplePlaybackVersion) samplePlaybackDefaults(state.tracks[7]);
 let saveTimeout;
 const undoHistory = [];
 const redoHistory = [];
@@ -1600,7 +1660,7 @@ function readProject(text) {
       if (!Number.isFinite(source[name]) || source[name] < 0 || source[name] > 1) throw new Error('Invalid instrument setting.');
       track[name] = source[name];
     }
-    for (const [name, low, high, integer] of [['patch', 0, patches[i].length - 1, true], ['notePitch', 0, 127, true], ['noteGate', .25, 64, false], ['octave', -2, 2, true]]) {
+    for (const [name, low, high, integer] of [['patch', 0, patches[i].length - 1, true], ['notePitch', 0, 127, true], ['noteGate', .25, 64, false], ['octave', -2, 2, true], ['sampleRoot', 0, 127, true]]) {
       if (source[name] === undefined) continue;
       const value = source[name];
       if (!Number.isFinite(value) || value < low || value > high || (integer && !Number.isInteger(value))) throw new Error('Invalid note setting.');
@@ -1613,18 +1673,24 @@ function readProject(text) {
       const asset = sampleFromProject(project, source.sampleId);
       track.sampleId = source.sampleId;
       track.sampleName = asset.name;
+      if (source.samplePlaybackVersion === 1) {
+        track.samplePlaybackVersion = 1;
+        track.sampleLoop = Boolean(source.sampleLoop);
+      }
     }
     track.steps = source.steps.map(step => {
       if (step === null) return null;
       if (!step || !Array.isArray(step.notes) || !step.notes.length || step.notes.length > 8 || step.notes.some(n => !Number.isInteger(n) || n < 0 || n > 127) || !Number.isFinite(step.gate) || step.gate < .25 || step.gate > 64 || !Number.isFinite(step.velocity) || step.velocity < 0 || step.velocity > 1) throw new Error('Invalid pattern data.');
       return { notes: [...step.notes], gate: step.gate, velocity: step.velocity };
     });
+    if (track.sampleId && !track.samplePlaybackVersion) samplePlaybackDefaults(track);
     return track;
   });
   return { preset: typeof song.preset === 'string' ? song.preset : 'blank', tempo: song.tempo, tracks };
 }
 function loadProject(text) {
   const song = readProject(text);
+  stopSamplePreview();
   const id = song.tracks[7].sampleId;
   if (id) {
     const asset = sampleFromProject(JSON.parse(text), id);
@@ -1662,6 +1728,7 @@ function restoreEdit(redo = false) {
   restoringHistory = true;
   try {
     releaseAll();
+    stopSamplePreview();
     const snapshot = source.pop();
     (redo ? undoHistory : redoHistory).push(lastSavedState);
     state = JSON.parse(snapshot);
@@ -2113,6 +2180,13 @@ function renderMixer() {
       arrow.setAttribute('aria-label', 'Texture sound options');
       const items = document.createElement('div');
       items.className = 'sample-menu';
+      const preview = button(samplePreview ? 'Stop preview' : 'Preview sample', () => { menu.open = false; previewSample(); });
+      preview.disabled = !track.sampleId;
+      items.append(preview);
+      const loop = button('Loop sample', () => { track.sampleLoop = !track.sampleLoop; menu.open = false; save(); renderMixer(); });
+      pressed(loop, Boolean(track.sampleLoop));
+      loop.disabled = !track.sampleId;
+      items.append(loop);
       items.append(button('Record microphone', () => { menu.open = false; recordMicrophone(); }));
       items.append(button('Load sample…', () => { menu.open = false; $('sampleFile').click(); }));
       const builtin = button('Use Texture', () => { menu.open = false; useTexture(); });
@@ -2303,7 +2377,7 @@ $('saveProject').onclick = async () => {
 $('stopMicrophone').onclick = () => stopMicrophone();
 $('cancelMicrophone').onclick = () => stopMicrophone(true);
 $('microphoneDialog').addEventListener('cancel', event => { event.preventDefault(); stopMicrophone(true); });
-window.addEventListener('pagehide', () => stopMicrophone(true));
+window.addEventListener('pagehide', () => { stopMicrophone(true); stopSamplePreview(); });
 $('sampleFile').onchange = async event => {
   const targetTrack = state.tracks[7];
   const file = event.target.files?.[0];
