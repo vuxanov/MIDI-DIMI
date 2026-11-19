@@ -224,6 +224,11 @@ details p {max-width:78ch}
 <input id="sampleFile" type="file" accept="audio/*,.wav,.mp3,.aif,.aiff,.flac,.ogg,.m4a" hidden>
 <input id="projectFile" type="file" accept=".json,.dimi,application/json" hidden>
 </main>
+<dialog id="microphoneDialog" aria-labelledby="microphoneTitle">
+<p id="microphoneTitle">Record microphone</p>
+<p><output id="microphoneTime" aria-label="Recording time">0:00</output></p>
+<div class="dialog-actions"><button id="cancelMicrophone" type="button">Cancel</button><button id="stopMicrophone" type="button" class="primary">■ Stop</button></div>
+</dialog>
 <dialog id="deleteDialog" aria-labelledby="deleteTitle" aria-describedby="deleteDescription">
 <form method="dialog">
 <p id="deleteTitle">Delete everything?</p>
@@ -1381,6 +1386,104 @@ async function prepareSample(id, engine) {
   }
   engine.samples.set(id, asset.buffer);
 }
+let microphoneCapture;
+function closeMicrophone(capture) {
+  clearInterval(capture.timer);
+  clearTimeout(capture.limit);
+  capture.stream?.getTracks().forEach(track => track.stop());
+  if (microphoneCapture !== capture) return;
+  microphoneCapture = undefined;
+  if ($('microphoneDialog').open) $('microphoneDialog').close();
+}
+function stopMicrophone(discard = false) {
+  const capture = microphoneCapture;
+  if (!capture) return;
+  capture.discard ||= discard;
+  $('stopMicrophone').disabled = true;
+  if (capture.recorder?.state === 'recording') {
+    capture.recorder.stop();
+    capture.stream.getTracks().forEach(track => track.stop());
+  } else closeMicrophone(capture);
+}
+async function recordMicrophone() {
+  if (microphoneCapture) return;
+  if (!navigator.mediaDevices?.getUserMedia || !globalThis.MediaRecorder) return status('Microphone recording is not supported in this browser.');
+  const capture = { targetTrack: state.tracks[7], chunks: [], bytes: 0, discard: false };
+  microphoneCapture = capture;
+  $('microphoneTime').textContent = '0:00';
+  $('stopMicrophone').disabled = true;
+  $('microphoneDialog').showModal();
+  try {
+    const engine = await startAudio();
+    if (microphoneCapture !== capture) return;
+    capture.engine = engine;
+    capture.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+    if (microphoneCapture !== capture) { capture.stream.getTracks().forEach(track => track.stop()); return; }
+    const mimeType = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/ogg;codecs=opus'].find(type => MediaRecorder.isTypeSupported(type));
+    const recorder = new MediaRecorder(capture.stream, mimeType ? { mimeType } : {});
+    capture.recorder = recorder;
+    recorder.ondataavailable = event => {
+      if (!event.data.size || capture.discard) return;
+      capture.bytes += event.data.size;
+      if (capture.bytes > 8 * 1024 * 1024) {
+        capture.discard = true;
+        status('Recording exceeded 8 MB. Try a shorter recording.');
+        stopMicrophone(true);
+        return;
+      }
+      capture.chunks.push(event.data);
+    };
+    recorder.onerror = () => {
+      capture.discard = true;
+      status('Microphone recording failed. Your previous sample is unchanged.');
+      stopMicrophone(true);
+    };
+    recorder.onstop = async () => {
+      closeMicrophone(capture);
+      if (capture.discard || !capture.chunks.length) return;
+      try {
+        const blob = new Blob(capture.chunks, { type: recorder.mimeType });
+        const bytes = new Uint8Array(await blob.arrayBuffer());
+        await loadSampleBytes(bytes, 'Microphone ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), capture.engine, capture.targetTrack);
+      } catch (error) {
+        status('Could not load microphone recording: ' + error.message);
+      }
+    };
+    recorder.start(250);
+    capture.started = Date.now();
+    $('stopMicrophone').disabled = false;
+    capture.timer = setInterval(() => {
+      const seconds = Math.floor((Date.now() - capture.started) / 1000);
+      $('microphoneTime').textContent = Math.floor(seconds / 60) + ':' + String(seconds % 60).padStart(2, '0');
+    }, 250);
+    capture.limit = setTimeout(() => stopMicrophone(), 299000);
+    for (const track of capture.stream.getAudioTracks()) track.onended = () => { if (microphoneCapture === capture) stopMicrophone(); };
+  } catch (error) {
+    closeMicrophone(capture);
+    if (!capture.discard) status('Could not start microphone. Allow microphone access and try again.');
+  }
+}
+async function loadSampleBytes(bytes, name, engine, targetTrack) {
+  if (!bytes.length || bytes.length > 8 * 1024 * 1024) throw new Error('Choose audio under 8 MB.');
+  const buffer = await engine.ctx.decodeAudioData(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+  if (!buffer.length || buffer.duration > 300) throw new Error('Choose a sample under five minutes.');
+  if (state.tracks[7] !== targetTrack) return;
+  let binary = '';
+  for (let offset = 0; offset < bytes.length; offset += 32768) binary += String.fromCharCode(...bytes.subarray(offset, offset + 32768));
+  const id = crypto.randomUUID();
+  const asset = { name: name.slice(0, 255), data: btoa(binary), buffer };
+  sampleAssets.set(id, asset);
+  engine.samples.set(id, buffer);
+  for (const voice of engine.voices) if (voice.index === 7) voice.stop(engine.ctx.currentTime, true);
+  targetTrack.sampleId = id;
+  targetTrack.sampleName = asset.name;
+  renderMixer();
+  renderPattern();
+  save();
+  try { await persistSample(id, asset); status(''); }
+  catch { status('Sample loaded. Save project to keep a copy.'); }
+}
+
 const textureName = () => state.tracks[7].sampleName || 'Texture';
 function useTexture() {
   if (audio) for (const voice of audio.voices) if (voice.index === 7) voice.stop(audio.ctx.currentTime, true);
@@ -1969,6 +2072,7 @@ function renderMixer() {
       arrow.setAttribute('aria-label', 'Texture sound options');
       const items = document.createElement('div');
       items.className = 'sample-menu';
+      items.append(button('Record microphone', () => { menu.open = false; recordMicrophone(); }));
       items.append(button('Load sample…', () => { menu.open = false; $('sampleFile').click(); }));
       const builtin = button('Use Texture', () => { menu.open = false; useTexture(); });
       builtin.disabled = !track.sampleId;
@@ -2155,6 +2259,10 @@ $('saveProject').onclick = async () => {
   setTimeout(() => URL.revokeObjectURL(url), 30000);
   } catch (error) { status('Could not save project: ' + error.message); }
 };
+$('stopMicrophone').onclick = () => stopMicrophone();
+$('cancelMicrophone').onclick = () => stopMicrophone(true);
+$('microphoneDialog').addEventListener('cancel', event => { event.preventDefault(); stopMicrophone(true); });
+window.addEventListener('pagehide', () => stopMicrophone(true));
 $('sampleFile').onchange = async event => {
   const targetTrack = state.tracks[7];
   const file = event.target.files?.[0];
@@ -2162,25 +2270,7 @@ $('sampleFile').onchange = async event => {
   try {
     if (!file.size || file.size > 8 * 1024 * 1024) throw new Error('Choose an audio file under 8 MB.');
     const engine = await startAudio();
-    const bytes = new Uint8Array(await file.arrayBuffer());
-    const buffer = await engine.ctx.decodeAudioData(bytes.buffer.slice(0));
-    if (!buffer.length || buffer.duration > 300) throw new Error('Choose a sample under five minutes.');
-    let binary = '';
-    for (let offset = 0; offset < bytes.length; offset += 32768) binary += String.fromCharCode(...bytes.subarray(offset, offset + 32768));
-    const id = crypto.randomUUID();
-    const asset = { name: file.name.slice(0, 255), data: btoa(binary), buffer };
-    sampleAssets.set(id, asset);
-    engine.samples.set(id, buffer);
-    if (state.tracks[7] !== targetTrack) return;
-    for (const voice of engine.voices) if (voice.index === 7) voice.stop(engine.ctx.currentTime, true);
-    const track = targetTrack;
-    track.sampleId = id;
-    track.sampleName = asset.name;
-    renderMixer();
-    renderPattern();
-    save();
-    try { await persistSample(id, asset); status(''); }
-    catch { status('Sample loaded. Save project to keep a copy.'); }
+    await loadSampleBytes(new Uint8Array(await file.arrayBuffer()), file.name, engine, targetTrack);
   } catch (error) {
     status('Could not load sample: ' + error.message);
   } finally {
