@@ -70,7 +70,16 @@ kbd {font:inherit;opacity:.6}
 .filter-toggle {font:inherit;border:0;min-height:0;padding:0;background:transparent;text-align:inherit;white-space:nowrap}
 .filter-toggle::after {content:" ▾";font-size:1.15em}
 .filter-toggle:hover {outline:0;text-decoration:underline}
-.track {width:100%;white-space:nowrap;padding-inline:2px;font-weight:600}
+.track {width:100%;white-space:nowrap;padding-inline:2px;font-weight:600;overflow:hidden;text-overflow:ellipsis}
+.track-split {display:flex;width:100%;min-width:0;align-self:stretch}
+.track-split .track {min-width:0;border-right:0}
+.track-menu {position:relative;flex:0 0 24px}
+.track-menu summary {list-style:none;display:flex;align-items:center;justify-content:center;height:100%;min-height:30px;border:1px solid}
+.track-menu summary::-webkit-details-marker {display:none}
+.track-menu summary::after {content:'▾'}
+.track-menu .sample-menu {position:absolute;right:0;bottom:calc(100% + 4px);z-index:12;display:grid;gap:4px;min-width:150px;padding:6px;border:1px solid;background:var(--paper)}
+.track-menu:not([open]) .sample-menu {display:none}
+.sample-menu button {white-space:nowrap;text-align:left}
 .dial {position:relative;width:28px;height:28px;border:1px solid var(--ink);border-radius:50%;display:block;margin:auto}
 .dial::after {content:"";position:absolute;left:12px;top:3px;width:2px;height:8px;background:var(--ink);transform:rotate(var(--angle));transform-origin:50% 10px;pointer-events:none}
 .dial input {position:absolute;inset:0;width:100%;height:100%;margin:0;opacity:0;cursor:ns-resize;touch-action:none}
@@ -83,7 +92,8 @@ kbd {font:inherit;opacity:.6}
 #octave {font-size:12px;white-space:nowrap}
 .pattern-toolbar {display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .section-label {display:flex;align-items:center;gap:8px}
-.pattern-toolbar .section-label {margin-right:auto}
+.pattern-toolbar .section-label {margin-right:auto;min-width:0;max-width:40%}
+#patternTitle {overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dial:has(input.touched),.dial:has(input:active) {background:var(--ink)}
 .dial:has(input.touched)::after,.dial:has(input:active)::after {background:var(--paper)}
 .fader.touched,.fader:active {outline:1px solid var(--ink);outline-offset:2px}
@@ -144,6 +154,7 @@ details p {max-width:78ch}
   .dial::after {left:8px;top:2px;height:6px;transform-origin:50% 7px}
   .fader {height:0;min-height:100%;margin-block:0}
   .track {min-height:27px;font-size:11px}
+  .track-menu summary {min-height:27px}
   #keyboard {margin-bottom:5px}
   .piano-key {min-height:29px;padding:2px 0}
   #steps {gap:7px}
@@ -209,6 +220,7 @@ details p {max-width:78ch}
 <div class="midi-send"><button id="connectOutput" type="button">Connect output</button><label>Send to <select id="performanceOutput"><option value="">Off</option></select></label><label><input id="sendNotes" type="checkbox" checked> Notes</label><label><input id="sendClock" type="checkbox" checked> Clock</label></div>
 <p>Output channels: Kick 1, Clap 2, Hat 3, Metal 4, Bass 5, Stab 6, Pad 7, Texture 8. MIDI DIMI sends tempo and transport; set the receiver to external MIDI clock.</p>
 <p>Upper MIDI buttons select tracks. Lower buttons edit eight steps or play notes in Keys mode. Track arrows move through the pattern eight steps at a time or shift the octave in Keys mode. Cmd/Ctrl+Z undoes edits; Cmd/Ctrl+Shift+Z or Ctrl+Y redoes them. Space plays or stops. A S D F G H J K mirror the lower row. Your session and learned controls save in this browser.</p></details>
+<input id="sampleFile" type="file" accept="audio/*,.wav,.mp3,.aif,.aiff,.flac,.ogg,.m4a" hidden>
 <input id="projectFile" type="file" accept=".json,.dimi,application/json" hidden>
 </main>
 <dialog id="deleteDialog" aria-labelledby="deleteTitle" aria-describedby="deleteDescription">
@@ -278,6 +290,7 @@ class Audio {
     this.kits = [0, 1, 2].map(variant => this.drums(variant));
     this.noise = this.buffer(1.9, () => Math.random() * 2 - 1);
     this.voices = new Set();
+    this.samples = new Map();
     this.channels = settings.map((_, index) => {
       const input = ctx.createGain();
       const filter = ctx.createBiquadFilter();
@@ -466,7 +479,19 @@ class Audio {
         sources.push(source);
       }
     }
-    if (texture) {
+    if (texture && track.sampleId) {
+      const buffer = this.samples.get(track.sampleId);
+      if (!buffer) { amp.disconnect(); return () => {}; }
+      for (const note of notes) {
+        const source = ctx.createBufferSource();
+        source.buffer = buffer;
+        source.loop = true;
+        source.playbackRate.value = 2 ** ((note - roots[7]) / 12);
+        source.connect(amp);
+        sources.push(source);
+      }
+    }
+    if (texture && !track.sampleId) {
       const noise = ctx.createBufferSource();
       noise.buffer = this.noise;
       noise.loop = true;
@@ -506,6 +531,7 @@ class Audio {
     const minimumLiveGate = Math.min(.12, attack + .025);
     let stopped = false;
     const voice = {
+      index,
       scheduled: gate !== null,
       stop: (at, hard = false) => {
         if (stopped && !hard) return;
@@ -1317,6 +1343,58 @@ function session(preset) {
   return { preset, tempo: ambient ? 86 : hypnotic ? 132 : 128, tracks };
 }
 
+const sampleAssets = new Map();
+let sampleDatabase;
+function sampleStore(mode, action) {
+  if (!sampleDatabase) sampleDatabase = new Promise((resolve, reject) => {
+    if (!globalThis.indexedDB) return reject(new Error('Sample storage unavailable.'));
+    const request = indexedDB.open('dimi-samples-v1', 1);
+    request.onupgradeneeded = () => request.result.createObjectStore('samples');
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+  return sampleDatabase.then(db => new Promise((resolve, reject) => {
+    const transaction = db.transaction('samples', mode);
+    const request = action(transaction.objectStore('samples'));
+    transaction.oncomplete = () => resolve(request.result);
+    transaction.onerror = () => reject(transaction.error);
+    transaction.onabort = () => reject(transaction.error);
+  }));
+}
+function persistSample(id, asset) {
+  return sampleStore('readwrite', store => store.put({ name: asset.name, data: asset.data }, id));
+}
+async function getSample(id) {
+  if (!sampleAssets.has(id)) {
+    const asset = await sampleStore('readonly', store => store.get(id));
+    if (!asset) throw new Error('Sample is not available. Load the file again.');
+    sampleAssets.set(id, asset);
+  }
+  return sampleAssets.get(id);
+}
+async function prepareSample(id, engine) {
+  const asset = await getSample(id);
+  if (!asset.buffer) {
+    const bytes = Uint8Array.from(atob(asset.data), character => character.charCodeAt(0));
+    asset.buffer = await engine.ctx.decodeAudioData(bytes.buffer);
+  }
+  engine.samples.set(id, asset.buffer);
+}
+const textureName = () => state.tracks[7].sampleName || 'Texture';
+function useTexture() {
+  if (audio) for (const voice of audio.voices) if (voice.index === 7) voice.stop(audio.ctx.currentTime, true);
+  delete state.tracks[7].sampleId;
+  delete state.tracks[7].sampleName;
+  renderMixer();
+  renderPattern();
+  save();
+}
+function sampleFromProject(project, id) {
+  const asset = project.samples?.[id];
+  if (!asset || typeof asset.name !== 'string' || !asset.name.length || asset.name.length > 255 || typeof asset.data !== 'string' || !asset.data.length || asset.data.length > 12 * 1024 * 1024 || asset.data.length % 4 || !/^[A-Za-z0-9+/]*={0,2}$/.test(asset.data)) throw new Error('Missing or invalid sample data.');
+  return { name: asset.name, data: asset.data };
+}
+
 let state = session('blank');
 try {
   const saved = JSON.parse(localStorage.getItem('dimi-session-v1'));
@@ -1354,7 +1432,14 @@ function updateHistoryButtons() {
   $('redoEdit').disabled = !redoHistory.length;
 }
 function projectContents() {
-  return JSON.stringify({ format: 'midi-dimi', version: 1, song: state }, null, 2);
+  const samples = Object.create(null);
+  const id = state.tracks[7].sampleId;
+  if (id) {
+    const asset = sampleAssets.get(id);
+    if (!asset) throw new Error('Sample is still loading. Try Save project again.');
+    samples[id] = { name: asset.name, data: asset.data };
+  }
+  return JSON.stringify({ format: 'midi-dimi', version: 1, song: state, ...(id ? { samples } : {}) }, null, 2);
 }
 function readProject(text) {
   const project = JSON.parse(text);
@@ -1378,6 +1463,12 @@ function readProject(text) {
     }
     track.filterType = ['lowpass', 'highpass'].includes(source.filterType) ? source.filterType : defaults.tracks[i].filterType;
     track.mute = Boolean(source.mute);
+    if (i === 7 && source.sampleId) {
+      if (typeof source.sampleId !== 'string' || source.sampleId.length > 100) throw new Error('Invalid sample reference.');
+      const asset = sampleFromProject(project, source.sampleId);
+      track.sampleId = source.sampleId;
+      track.sampleName = asset.name;
+    }
     track.steps = source.steps.map(step => {
       if (step === null) return null;
       if (!step || !Array.isArray(step.notes) || !step.notes.length || step.notes.length > 8 || step.notes.some(n => !Number.isInteger(n) || n < 0 || n > 127) || !Number.isFinite(step.gate) || step.gate < .25 || step.gate > 64 || !Number.isFinite(step.velocity) || step.velocity < 0 || step.velocity > 1) throw new Error('Invalid pattern data.');
@@ -1389,6 +1480,12 @@ function readProject(text) {
 }
 function loadProject(text) {
   const song = readProject(text);
+  const id = song.tracks[7].sampleId;
+  if (id) {
+    const asset = sampleFromProject(JSON.parse(text), id);
+    sampleAssets.set(id, asset);
+    persistSample(id, asset).catch(() => {});
+  }
   releaseAll();
   midiStream.stop();
   if (playing) {
@@ -1400,6 +1497,7 @@ function loadProject(text) {
   audio?.stopSequence();
   audio?.resetEffects();
   state = song;
+  if (audio && state.tracks[7].sampleId) prepareSample(state.tracks[7].sampleId, audio).catch(() => {});
   queued = undefined;
   chosen = 0;
   bank = 0;
@@ -1422,6 +1520,7 @@ function restoreEdit(redo = false) {
     const snapshot = source.pop();
     (redo ? undoHistory : redoHistory).push(lastSavedState);
     state = JSON.parse(snapshot);
+    if (audio && state.tracks[7].sampleId) prepareSample(state.tracks[7].sampleId, audio).catch(() => {});
     lastSavedState = snapshot;
     lastEditGroup = undefined;
     audio?.stopSequence();
@@ -1460,6 +1559,11 @@ async function startAudio() {
   }
   if (audio.ctx.state !== 'running') await audio.ctx.resume();
   if (audio.ctx.state !== 'running') throw new Error('Audio output is suspended');
+  const id = state.tracks[7].sampleId;
+  if (id && !audio.samples.has(id)) {
+    try { await prepareSample(id, audio); }
+    catch (error) { status('Could not load sample. Choose it again from the Texture arrow.'); }
+  }
   return audio;
 }
 function updateAudio() {
@@ -1775,7 +1879,7 @@ function dialValue(input, index, name) {
   if (name === 'decay' && index < 4) display = Math.round(drumDecayTime(value, index) * 1000) + ' ms';
   if (name === 'pitch') display = noteName(noteStep(index)?.notes[0] ?? state.tracks[index].notePitch ?? roots[index]);
   if (name === 'duration') display = noteLengthText(noteStep(index)?.gate ?? state.tracks[index].noteGate ?? defaultNoteLength(index));
-  if (name === 'patch') display = patches[index][state.tracks[index].patch];
+  if (name === 'patch') display = index === 7 && state.tracks[7].sampleId ? 'Sample' : patches[index][state.tracks[index].patch];
   input.title = display;
   input.setAttribute('aria-valuetext', display);
   const caption = input.parentElement.nextElementSibling;
@@ -1803,6 +1907,7 @@ function renderMixer() {
       const input = Object.assign(document.createElement('input'), {
         type: 'range', min: 0, max: 1, step: name === 'duration' ? 1 / (noteLengths.length - 1) : .001
       });
+      input.disabled = Boolean(index === 7 && name === 'patch' && track.sampleId);
       input.dataset.param = name;
       input.setAttribute('aria-label', names[index] + ' ' + (parameterLabel(name, index)));
       ring.append(input);
@@ -1852,7 +1957,25 @@ function renderMixer() {
       setParam(index, 'volume', +fader.value);
       touchControl(-1, index);
     };
-    column.append(fader, button(names[index], () => selectTrack(index), 'track'));
+    const trackButton = button(index === 7 ? textureName() : names[index], () => selectTrack(index), 'track');
+    if (index === 7) {
+      trackButton.title = textureName();
+      const split = document.createElement('div');
+      split.className = 'track-split';
+      const menu = document.createElement('details');
+      menu.className = 'track-menu';
+      const arrow = document.createElement('summary');
+      arrow.setAttribute('aria-label', 'Texture sound options');
+      const items = document.createElement('div');
+      items.className = 'sample-menu';
+      items.append(button('Load sample…', () => { menu.open = false; $('sampleFile').click(); }));
+      const builtin = button('Use Texture', () => { menu.open = false; useTexture(); });
+      builtin.disabled = !track.sampleId;
+      items.append(builtin);
+      menu.append(arrow, items);
+      split.append(trackButton, menu);
+      column.append(fader, split);
+    } else column.append(fader, trackButton);
     return column;
   }));
   updateMixer();
@@ -1964,7 +2087,7 @@ function renderSteps() {
 }
 
 function renderPattern() {
-  $('patternTitle').textContent = names[selected];
+  $('patternTitle').textContent = selected === 7 ? textureName() : names[selected];
   $('length').value = state.tracks[selected].length;
   updateMixer();
   playbackStatus();
@@ -2019,21 +2142,56 @@ if (/Mac|iPhone|iPad/.test(navigator.platform || '')) {
   $('redoShortcut').textContent = '⇧ ⌘ Z';
 }
 updateHistoryButtons();
-$('saveProject').onclick = () => {
+$('saveProject').onclick = async () => {
   $('optionsMenu').open = false;
+  try {
+    if (state.tracks[7].sampleId) await getSample(state.tracks[7].sampleId);
   const url = URL.createObjectURL(new Blob([projectContents()], { type: 'application/json' }));
   const link = document.createElement('a');
   link.href = url;
   link.download = 'MIDI DIMI ' + new Date().toISOString().replace(/[:.]/g, '-') + '.dimi.json';
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 30000);
+  } catch (error) { status('Could not save project: ' + error.message); }
+};
+$('sampleFile').onchange = async event => {
+  const targetTrack = state.tracks[7];
+  const file = event.target.files?.[0];
+  if (!file) return;
+  try {
+    if (!file.size || file.size > 8 * 1024 * 1024) throw new Error('Choose an audio file under 8 MB.');
+    const engine = await startAudio();
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const buffer = await engine.ctx.decodeAudioData(bytes.buffer.slice(0));
+    if (!buffer.length || buffer.duration > 300) throw new Error('Choose a sample under five minutes.');
+    let binary = '';
+    for (let offset = 0; offset < bytes.length; offset += 32768) binary += String.fromCharCode(...bytes.subarray(offset, offset + 32768));
+    const id = crypto.randomUUID();
+    const asset = { name: file.name.slice(0, 255), data: btoa(binary), buffer };
+    sampleAssets.set(id, asset);
+    engine.samples.set(id, buffer);
+    if (state.tracks[7] !== targetTrack) return;
+    for (const voice of engine.voices) if (voice.index === 7) voice.stop(engine.ctx.currentTime, true);
+    const track = targetTrack;
+    track.sampleId = id;
+    track.sampleName = asset.name;
+    renderMixer();
+    renderPattern();
+    save();
+    try { await persistSample(id, asset); status(''); }
+    catch { status('Sample loaded. Save project to keep a copy.'); }
+  } catch (error) {
+    status('Could not load sample: ' + error.message);
+  } finally {
+    event.target.value = '';
+  }
 };
 $('openProject').onclick = () => { $('optionsMenu').open = false; $('projectFile').click(); };
 $('projectFile').onchange = async event => {
   const file = event.target.files?.[0];
   if (!file) return;
   try {
-    if (file.size > 2 * 1024 * 1024) throw new Error('Project file is too large.');
+    if (file.size > 16 * 1024 * 1024) throw new Error('Project file is too large.');
     loadProject(await file.text());
     status('');
   } catch (error) {
