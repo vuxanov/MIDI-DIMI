@@ -980,19 +980,12 @@ function setupMIDI(actions) {
     shifted = false;
     actions.releaseAll();
   }
-  function restoreLegacyDisplay() {
-    if (!output || profile.value !== 'legacy') return;
-    // Restore a steady, visible buffer after another application or a login cycle.
-    output.send([176 + legacyTemplate, 0, 32]);
-    sent.clear();
-  }
   function receive(event) {
     if (!attached) return;
     const [status, number, value] = event.data;
     if (status === 240 && event.data.length === 9 && [0, 32, 41, 2, 17, 119].every((byte, i) => event.data[i + 1] === byte)) {
       legacyTemplate = event.data[7];
       legacyTemplateReported = true;
-      try { restoreLegacyDisplay(); } catch (error) { console.warn(error); }
       sent.clear();
       feedback();
       return;
@@ -1123,13 +1116,6 @@ function setupMIDI(actions) {
     try {
       await connectedOutput?.open?.();
       if (binding !== revision) return;
-      if (!modern && connectedOutput) {
-        // Factory 1 is the default input map. Do not replace a learned custom template.
-        if (access.sysexEnabled && !Object.keys(learned[input.id] || {}).length) {
-          connectedOutput.send([240, 0, 32, 41, 2, 17, 119, 8, 247]);
-        }
-        restoreLegacyDisplay();
-      }
       if (dawLEDs) {
         connectedOutput.send([159, 12, 127]);
         connectedOutput.send([182, 71, 127]);
