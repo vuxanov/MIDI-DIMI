@@ -226,7 +226,9 @@ details p {max-width:78ch}
 <p>MK1/MK2: select Factory template 1. XL 3: use the DAW input. Connect MIDI activates its DAW mode. If you use a custom mode, MIDI Learn can pick up the MIDI messages it sends. In Keys mode, configure custom buttons to send momentary messages.</p>
 <p id="midiActivity">No MIDI messages received.</p>
 <div class="setup-controls"><button id="testLED" type="button" disabled>Test lights</button><label>Input <select id="port"></select></label><label>LED output <select id="ledOutput"><option value="">Auto</option></select></label><label>Profile <select id="profile"><option value="legacy">XL MK1 / MK2</option><option value="xl3">XL 3</option></select></label><label>Control <select id="learnTarget"></select></label><button id="learn">Learn</button><button id="resetMap">Reset learned</button></div>
-<div class="midi-send"><button id="connectOutput" type="button">Connect output</button><label>Send to <select id="performanceOutput"><option value="">Off</option></select></label><label><input id="sendNotes" type="checkbox" checked> Notes</label><label><input id="sendClock" type="checkbox" checked> Clock</label><label><input id="localSound" type="checkbox"> Mute MIDI DIMI sound</label></div>
+<div class="midi-send"><button id="connectOutput" type="button">Connect MIDI I/O</button><label>Send to <select id="performanceOutput"><option value="">Off</option></select></label><label><input id="sendNotes" type="checkbox" checked> Notes</label><label><input id="sendClock" type="checkbox" checked> Clock</label><label><input id="localSound" type="checkbox"> Mute MIDI DIMI sound</label></div>
+<div class="midi-send"><label>Receive from <select id="performanceInput"><option value="">Off</option></select></label><label><input id="receiveNotes" type="checkbox" checked> Notes</label><label><input id="receiveClock" type="checkbox"> External clock</label></div>
+<p>Connect MIDI I/O connects MIDI inputs and outputs. Incoming notes use channels 1–8 for Kick through Texture. External clock follows MIDI Start, Continue, Stop and Song Position. Enable audio with Connect MIDI I/O before starting the sender.</p>
 <p>Output channels: Kick 1, Clap 2, Hat 3, Metal 4, Bass 5, Stab 6, Pad 7, Texture 8. MIDI DIMI sends tempo and transport; set the receiver to external MIDI clock.</p>
 <p>Upper MIDI buttons select tracks. Lower buttons edit eight steps or play notes in Keys mode. Track arrows move through the pattern eight steps at a time or shift the octave in Keys mode. Cmd/Ctrl+Z undoes edits; Cmd/Ctrl+Shift+Z or Ctrl+Y redoes them. Space plays or stops. A S D F G H J K mirror the lower row. Your session and learned controls save in this browser.</p></details>
 <input id="sampleFile" type="file" accept="audio/*,.wav,.mp3,.aif,.aiff,.flac,.ogg,.m4a" hidden>
@@ -835,11 +837,17 @@ class MIDIStream {
     this.channels = new Set();
     this.volumes = new Map();
     this.generation = 0;
+    this.inputGeneration = 0;
+    this.incoming = new Map();
+    this.pulses = 0;
+    this.clockPosition = 0;
+    this.transportGeneration = 0;
     const connect = $('connectOutput');
     connect.onclick = async () => {
       if (!navigator.requestMIDIAccess) return status('This browser does not support MIDI output.');
       connect.disabled = true;
       try {
+        await startAudio();
         this.access = await navigator.requestMIDIAccess();
         this.access.addEventListener?.('statechange', () => this.refresh());
         this.refresh();
@@ -850,14 +858,123 @@ class MIDIStream {
         connect.disabled = false;
       }
     };
+    $('performanceInput').onchange = () => this.chooseInput($('performanceInput').value);
+    $('receiveNotes').onchange = () => this.releaseInputNotes();
+    $('receiveClock').onchange = () => {
+      this.transportGeneration++;
+      this.lastPulse = undefined;
+      if (playing) transport();
+      $('tempo').disabled = this.externalClock;
+    };
     $('performanceOutput').onchange = () => this.choose($('performanceOutput').value);
     for (const id of ['sendNotes', 'sendClock']) $(id).onchange = () => {
       this.stop();
       if (playing) this.start(nextTime);
     };
-    window.addEventListener('pagehide', () => this.stop());
+    window.addEventListener('pagehide', () => { this.stop(); this.releaseInputNotes(); });
+  }
+  get externalClock() {
+    return Boolean(this.input && $('receiveClock').checked);
+  }
+  releaseInputNotes() {
+    this.inputGeneration++;
+    for (const stop of this.incoming.values()) stop(audio?.ctx.currentTime || 0);
+    this.incoming.clear();
+  }
+  async chooseInput(id) {
+    const generation = ++this.inputGeneration;
+    this.transportGeneration++;
+    if (this.externalClock && playing) transport();
+    this.input?.removeEventListener('midimessage', this.inputHandler);
+    for (const stop of this.incoming.values()) stop(audio?.ctx.currentTime || 0);
+    this.incoming.clear();
+    this.input = undefined;
+    this.lastPulse = undefined;
+    $('tempo').disabled = false;
+    const input = this.access?.inputs.get(id);
+    if (!input) return;
+    try {
+      await input.open?.();
+      if (generation !== this.inputGeneration) return;
+      this.input = input;
+      this.inputHandler = event => this.receive(event);
+      input.addEventListener('midimessage', this.inputHandler);
+      $('tempo').disabled = this.externalClock;
+    } catch (error) {
+      $('performanceInput').value = '';
+      status('Could not open MIDI input.');
+    }
+  }
+  receive(event) {
+    const [command, number, value] = event.data;
+    if (this.externalClock) {
+      if (command === 242 && !playing) {
+        this.clockPosition = number + (value << 7);
+        this.pulses = 0;
+      }
+      if (command === 250 || command === 251) {
+        if (command === 250) { this.clockPosition = 0; this.pulses = 0; }
+        this.lastPulse = undefined;
+        this.pulseDuration = undefined;
+        const generation = ++this.transportGeneration;
+        startAudio().then(() => {
+          if (generation !== this.transportGeneration || !this.externalClock) return;
+          if (!playing) transport(this.clockPosition, generation);
+          else position = this.clockPosition;
+        }).catch(() => status('Enable audio with Connect MIDI I/O before receiving MIDI clock.'));
+      }
+      if (command === 252) {
+        this.transportGeneration++;
+        if (playing) transport();
+        this.releaseInputNotes();
+      }
+      if (command === 248) {
+        const now = event.receivedTime ?? performance.now();
+        const elapsed = now - this.lastPulse;
+        if (elapsed > 0 && elapsed < 250) {
+          this.pulseDuration = this.pulseDuration ? this.pulseDuration * .85 + elapsed * .15 : elapsed;
+          state.tempo = clamp(60000 / (this.pulseDuration * 24), 40, 220);
+          $('tempo').value = Math.round(state.tempo * 10) / 10;
+          updateAudio();
+        }
+        this.lastPulse = now;
+        if (playing) {
+          if (this.pulses === 0) {
+            nextTime = audio.ctx.currentTime + .006;
+            runTick();
+            this.clockPosition = position;
+          }
+          this.pulses = (this.pulses + 1) % 6;
+        }
+      }
+    }
+    const type = command & 240;
+    const channel = command & 15;
+    if (!$('receiveNotes').checked || channel > 7) return;
+    const key = channel * 128 + number;
+    if (type === 128 || (type === 144 && value === 0)) {
+      this.incoming.get(key)?.(audio?.ctx.currentTime || 0);
+      this.incoming.delete(key);
+    } else if (type === 176 && (number === 120 || number === 123)) {
+      for (const [id, stop] of this.incoming) if (Math.floor(id / 128) === channel) {
+        stop(audio?.ctx.currentTime || 0);
+        this.incoming.delete(id);
+      }
+    } else if (type === 144 && value > 0) {
+      if (!audio || audio.ctx.state !== 'running') return;
+      this.incoming.get(key)?.(audio.ctx.currentTime);
+      this.incoming.delete(key);
+      const track = state.tracks[channel];
+      if (track.mute) return;
+      this.incoming.set(key, audio.hit(channel, track, [number], audio.ctx.currentTime + .006, null, value / 127));
+    }
   }
   refresh() {
+    const inputs = [...(this.access?.inputs.values() || [])].filter(port => port.state !== 'disconnected');
+    const selectedInput = this.input?.id || '';
+    $('performanceInput').replaceChildren(new Option('Off', ''), ...inputs.map(port => new Option(port.name || port.id, port.id)));
+    $('performanceInput').value = inputs.some(port => port.id === selectedInput) ? selectedInput : '';
+    if (this.input && !inputs.some(port => port.id === selectedInput)) this.chooseInput('');
     const ports = [...(this.access?.outputs.values() || [])].filter(port => port.state !== 'disconnected' && !/launch control|lcxl|hui/i.test(port.name || ''));
     const id = this.output?.id || '';
     $('performanceOutput').replaceChildren(new Option('Off', ''), ...ports.map(port => new Option(port.name || port.id, port.id)));
@@ -894,13 +1011,13 @@ class MIDIStream {
   }
   start(time) {
     this.volumes.clear();
-    if (this.output && $('sendClock').checked) {
+    if (this.output && $('sendClock').checked && !this.externalClock) {
       this.send([250], this.timestamp(time));
       this.clockRunning = true;
     }
   }
   clock(time, sixteenth) {
-    if (!this.output || !$('sendClock').checked) return;
+    if (!this.output || !$('sendClock').checked || this.externalClock) return;
     if (!this.clockRunning) this.start(time);
     for (let pulse = 0; pulse < 6; pulse++) this.send([248], this.timestamp(time + pulse * sixteenth / 6));
   }
@@ -1957,6 +2074,7 @@ function tick() {
     });
     position++;
     nextTime += stepTime();
+    if (midiStream.externalClock) break;
   }
 }
 function animate() {
@@ -1984,7 +2102,7 @@ function runTick() {
 }
 
 let starting = false;
-async function transport() {
+async function transport(startPosition = 0, clockGeneration) {
   if (starting) return;
   if (playing) {
     playing = false;
@@ -2005,13 +2123,14 @@ async function transport() {
     } finally {
       starting = false;
     }
+    if (clockGeneration !== undefined && clockGeneration !== midiStream.transportGeneration) return;
     playing = true;
-    position = 0;
+    position = startPosition;
     nextTime = audio.ctx.currentTime + .04;
     midiStream.start(nextTime);
-    timer = setInterval(runTick, 22);
+    if (!midiStream.externalClock) timer = setInterval(runTick, 22);
     requestAnimationFrame(animate);
-    runTick();
+    if (!midiStream.externalClock) runTick();
   }
   $('play').textContent = playing ? '■ Stop' : '▶ Play';
   pressed($('play'), playing);
@@ -2633,7 +2752,7 @@ $('projectFile').onchange = async event => {
     event.target.value = '';
   }
 };
-$('play').onclick = transport;
+$('play').onclick = () => transport();
 $('record').onclick = toggleRecord;
 $('recordAudio').onclick = toggleAudioRecording;
 $('keys').onclick = toggleKeys;
