@@ -21,7 +21,7 @@ dialog p {margin:0 0 16px}
 .input-level span {display:block;height:100%;background:var(--ink);transform:scaleX(var(--level));transform-origin:left;transition:transform 70ms linear}
 .dialog-actions {display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap}
 main {max-width:1240px;margin:auto;padding:24px clamp(12px,4vw,48px)}
-header,.section-head,.transport,.mode,.setup-controls,#editor {display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+header,.section-head,.transport,.mode,#editor {display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 header,.section-head {justify-content:space-between}
 header {padding:0 0 12px;border-bottom:2px solid}
 h1 {font-size:clamp(24px,3vw,36px);letter-spacing:-.085em;line-height:1;margin:0;font-weight:700}
@@ -57,8 +57,6 @@ label {display:inline-flex;align-items:center;gap:7px}
 .overflow-panel button {text-align:left;white-space:nowrap}
 .overflow-panel .shortcut-action {display:flex;justify-content:space-between;gap:24px}
 kbd {font:inherit;opacity:.6}
-.midi-send {display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px}
-.midi-send input[type=checkbox] {accent-color:var(--ink)}
 #keys,#record,#recordAudio {display:inline-flex;align-items:center;justify-content:center;gap:7px}
 .record-icon {display:block;flex:0 0 8px;width:8px;height:8px;border-radius:50%;background:currentColor}
 .record-icon.stop {border-radius:0}
@@ -123,6 +121,34 @@ button:active {background:var(--ink);color:var(--paper)}
 #editor:not(:empty) {margin-bottom:8px}
 details {margin-top:14px;padding:8px 0;border-top:1px solid;font-size:12px}
 details p {max-width:78ch}
+#setup {
+  --setup-rule:color-mix(in srgb,var(--ink) 32%,var(--paper));
+  --setup-muted:color-mix(in srgb,var(--ink) 66%,var(--paper));
+  line-height:1.5;
+}
+#setup > summary {font-size:14px;font-weight:700}
+.setup-grid {display:grid;gap:16px;margin-top:16px}
+.setup-grid section {min-width:0;margin:0}
+.setup-grid section + section {padding-top:12px;border-top:1px solid var(--setup-rule)}
+.setup-grid h2,.setup-reference h2 {margin:0 0 8px;font-size:14px;letter-spacing:normal}
+.setup-grid h3 {font-size:inherit;margin:0 0 6px}
+.setup-group {margin-top:12px;padding-top:12px;border-top:1px solid var(--setup-rule)}
+.setup-fields {display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,145px),1fr));gap:8px}
+.setup-field {display:grid;gap:4px;min-width:0}
+.setup-field select {width:100%;min-width:0;text-overflow:ellipsis}
+.setup-actions,.setup-options {display:flex;align-items:center;flex-wrap:wrap;gap:6px 12px;margin-top:8px}
+.setup-options input {accent-color:var(--ink);margin:0}
+#setup p {margin:8px 0 0;color:var(--setup-muted);overflow-wrap:anywhere}
+#midiActivity {font-variant-numeric:tabular-nums}
+.setup-reference {margin:16px 0 0;padding-top:12px;border-top:1px solid var(--setup-rule)}
+.setup-reference dl {display:grid;grid-template-columns:max-content minmax(0,1fr);gap:4px 16px;max-width:78ch;margin:0}
+.setup-reference dd {margin:0;color:var(--setup-muted)}
+.setup-reference kbd {opacity:1;color:var(--ink)}
+@media (max-width:400px) {
+  .setup-reference dl {grid-template-columns:minmax(0,1fr)}
+  .setup-reference dd + dt {margin-top:4px}
+}
+
 
 @media (orientation: landscape) and (max-height: 500px) and (max-width: 1000px) {
   :root {font-size:12px;-webkit-text-size-adjust:100%}
@@ -222,15 +248,63 @@ details p {max-width:78ch}
 <div id="editor"></div>
 <div class="scroll"><div id="steps"></div></div>
 </section>
-<details id="setup"><summary>MIDI mapping &amp; shortcuts</summary>
-<p>MK1/MK2: select Factory template 1. XL 3: use the DAW input. Connect MIDI activates its DAW mode. If you use a custom mode, MIDI Learn can pick up the MIDI messages it sends. In Keys mode, configure custom buttons to send momentary messages.</p>
-<p id="midiActivity">No MIDI messages received.</p>
-<div class="setup-controls"><button id="testLED" type="button" disabled>Test lights</button><label>Input <select id="port"></select></label><label>LED output <select id="ledOutput"><option value="">Auto</option></select></label><label>Profile <select id="profile"><option value="legacy">XL MK1 / MK2</option><option value="xl3">XL 3</option></select></label><label>Control <select id="learnTarget"></select></label><button id="learn">Learn</button><button id="resetMap">Reset learned</button></div>
-<div class="midi-send"><button id="connectOutput" type="button">Connect MIDI I/O</button><label>Send to <select id="performanceOutput"><option value="">Off</option></select></label><label><input id="sendNotes" type="checkbox" checked> Notes</label><label><input id="sendClock" type="checkbox" checked> Clock</label><label><input id="localSound" type="checkbox"> Mute MIDI DIMI sound</label></div>
-<div class="midi-send"><label>Receive from <select id="performanceInput"><option value="">Off</option></select></label><label><input id="receiveNotes" type="checkbox" checked> Notes</label><label><input id="receiveClock" type="checkbox"> External clock</label></div>
-<p>Connect MIDI I/O connects MIDI inputs and outputs. Incoming notes use channels 1–8 for Kick through Texture. External clock follows MIDI Start, Continue, Stop and Song Position. Enable audio with Connect MIDI I/O before starting the sender.</p>
-<p>Output channels: Kick 1, Clap 2, Hat 3, Metal 4, Bass 5, Stab 6, Pad 7, Texture 8. MIDI DIMI sends tempo and transport; set the receiver to external MIDI clock.</p>
-<p>Upper MIDI buttons select tracks. Lower buttons edit eight steps or play notes in Keys mode. Track arrows move through the pattern eight steps at a time or shift the octave in Keys mode. Cmd/Ctrl+Z undoes edits; Cmd/Ctrl+Shift+Z or Ctrl+Y redoes them. Space plays or stops. A S D F G H J K mirror the lower row. Your session and learned controls save in this browser.</p></details>
+<details id="setup">
+<summary>MIDI setup &amp; shortcuts</summary>
+<div class="setup-grid">
+  <section aria-labelledby="controllerHeading">
+    <h2 id="controllerHeading">Controller mapping</h2>
+    <div class="setup-fields">
+      <label class="setup-field">Controller input <select id="port"><option value="">Disconnected</option></select></label>
+      <label class="setup-field">Profile <select id="profile"><option value="legacy">XL MK1 / MK2</option><option value="xl3">XL 3</option></select></label>
+      <label class="setup-field">LED output <select id="ledOutput"><option value="">Auto</option></select></label>
+    </div>
+    <div class="setup-actions"><button id="testLED" type="button" disabled>Test lights</button></div>
+    <p>Use Factory Template 1 on MK1/MK2. On XL 3, select the DAW input. Connect MIDI activates DAW mode.</p>
+    <div class="setup-group">
+      <h3>MIDI Learn</h3>
+      <label class="setup-field">Control to map <select id="learnTarget"></select></label>
+      <div class="setup-actions"><button id="learn" type="button">Learn</button><button id="resetMap" type="button">Reset learned mappings</button></div>
+      <p>Map controls from a custom mode here. For Keys mode, set custom buttons to send momentary messages.</p>
+      <p>Controller activity <span aria-hidden="true">·</span> <span id="midiActivity">No MIDI messages received.</span></p>
+    </div>
+  </section>
+  <section aria-labelledby="routingHeading">
+    <h2 id="routingHeading">MIDI routing</h2>
+    <button id="connectOutput" type="button">Connect MIDI I/O</button>
+    <div class="setup-group">
+      <label class="setup-field">Send to <select id="performanceOutput"><option value="">Off</option></select></label>
+      <div class="setup-options">
+        <label><input id="sendNotes" type="checkbox" checked> Send notes</label>
+        <label><input id="sendClock" type="checkbox" checked> Send clock</label>
+        <label><input id="localSound" type="checkbox"> Mute MIDI DIMI sound</label>
+      </div>
+      <p>Set the receiving device to external MIDI clock to follow MIDI DIMI’s tempo and transport.</p>
+    </div>
+    <div class="setup-group">
+      <label class="setup-field">Receive from <select id="performanceInput"><option value="">Off</option></select></label>
+      <div class="setup-options">
+        <label><input id="receiveNotes" type="checkbox" checked> Receive notes</label>
+        <label><input id="receiveClock" type="checkbox"> Follow external clock</label>
+      </div>
+      <p>Click Connect MIDI I/O to enable audio before starting the sender. External clock follows Start, Continue, Stop and Song Position.</p>
+    </div>
+    <p>Note channels in both directions <span aria-hidden="true">·</span> 1 Kick, 2 Clap, 3 Hat, 4 Metal, 5 Bass, 6 Stab, 7 Pad, 8 Texture.</p>
+  </section>
+</div>
+<section class="setup-reference" aria-labelledby="shortcutsHeading">
+  <h2 id="shortcutsHeading">Shortcuts</h2>
+  <dl>
+    <dt>Upper MIDI buttons</dt><dd>Select tracks.</dd>
+    <dt>Lower MIDI buttons</dt><dd>Edit eight steps or play notes in Keys mode.</dd>
+    <dt>Track arrows</dt><dd>Move eight steps at a time or shift the octave in Keys mode.</dd>
+    <dt><kbd>Space</kbd></dt><dd>Play or stop.</dd>
+    <dt><kbd>A S D F G H J K</kbd></dt><dd>Mirror the lower row.</dd>
+    <dt><kbd>Cmd/Ctrl+Z</kbd></dt><dd>Undo an edit.</dd>
+    <dt>Redo</dt><dd><kbd>Cmd/Ctrl+Shift+Z</kbd> or <kbd>Ctrl+Y</kbd></dd>
+  </dl>
+  <p>Your session and learned mappings are saved in this browser.</p>
+</section>
+</details>
 <input id="sampleFile" type="file" accept="audio/*,.wav,.mp3,.aif,.aiff,.flac,.ogg,.m4a" hidden>
 <input id="projectFile" type="file" accept=".json,.dimi,application/json" hidden>
 </main>
@@ -1191,7 +1265,7 @@ function setupMIDI(actions) {
     if (!input) {
       detach();
       button.textContent = 'Cancel MIDI';
-      actions.status(ports.length ? 'Choose an input under MIDI mapping.' : 'Connect your Launch Control XL over USB.');
+      actions.status(ports.length ? 'Choose Controller input under MIDI setup & shortcuts.' : 'Connect your Launch Control XL over USB.');
       return;
     }
     const modern = input === active ? profile.value === 'xl3' : /xl\s*3|lcxl3|daw/i.test(input.name || '');
@@ -1247,7 +1321,7 @@ function setupMIDI(actions) {
     ledTest.disabled = !output || (modern && !dawLEDs);
     feedback();
     button.textContent = 'Disconnect MIDI';
-    actions.status(output ? '' : 'Choose LED output under MIDI mapping.');
+    actions.status(output ? '' : 'Choose an LED output under Controller mapping.');
   }
 
   button.onclick = async () => {
