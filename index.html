@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -210,7 +210,7 @@ details p {max-width:78ch}
 <details id="optionsMenu" class="overflow">
 <summary aria-label="Options" title="Options">⋯</summary>
 <div class="overflow-panel">
-<button id="themeToggle" type="button" aria-pressed="false">☾ Dark mode</button>
+<button id="themeToggle" type="button" aria-pressed="true">☀ Light mode</button>
 <button id="undoEdit" type="button" class="shortcut-action" disabled><span>Undo</span><kbd id="undoShortcut">Ctrl Z</kbd></button>
 <button id="redoEdit" type="button" class="shortcut-action" disabled><span>Redo</span><kbd id="redoShortcut">Ctrl Y</kbd></button>
 <button id="saveProject" type="button">Save project</button>
@@ -353,7 +353,15 @@ function cutoff(value, index) {
 }
 const attackTime = (value, index) => .003 + value ** 2 * (index < 4 ? .17 : index === 7 ? .55 : 1.4);
 const holdTime = value => .22 * value ** 2;
-const drumDecayTime = (value, index) => [.035, .025, .012, .025][index] * ([30, 20, 48, 32][index] ** value);
+const hatSounds = [
+  { decayScale: .60, metalLevel: .035, noiseLevel: .28, noiseDifference: .15 }, // Closed
+  { decayScale: 1.0, metalLevel: .04, noiseLevel: .34, noiseDifference: .88 }, // Bright
+  { decayScale: 3.0, metalLevel: .10, noiseLevel: .19, noiseDifference: .40 } // Open
+];
+const drumDecayTime = (value, index, patch) => {
+  const decay = [.035, .025, .012, .025][index] * ([30, 20, 48, 32][index] ** value);
+  return index === 2 ? decay * hatSounds[patch].decayScale : decay;
+};
 const releaseTime = (value, index) => .025 + value ** 2 * (index < 4 ? .65 : index >= 6 ? 5 : 2.7);
 const lfoRate = (value, tempo) => tempo / 240 * 2 ** (value * 8 - 3);
 const clamp = (value, minimum, maximum) => Math.min(maximum, Math.max(minimum, value));
@@ -437,7 +445,7 @@ class Audio {
     const feedback = ctx.createGain();
     const echoFilter = ctx.createBiquadFilter();
     echoFilter.frequency.value = 6200;
-    feedback.gain.value = .72;
+    feedback.gain.value = .58;
     delay.connect(echoFilter).connect(feedback).connect(delay);
     const delayReturn = ctx.createGain();
     delayReturn.gain.value = 1.3;
@@ -467,6 +475,8 @@ class Audio {
 
   drums(variant) {
     let previous = 0;
+    let previousHatNoise = 0;
+    const hat = hatSounds[variant];
     return [
       this.buffer(2.2, t => {
         const fundamental = 45 + variant * 5;
@@ -484,7 +494,10 @@ class Audio {
       }),
       this.buffer(1.5, t => {
         const metal = [3119, 4187, 5711, 6571, 7949].reduce((sum, f) => sum + Math.sign(Math.sin(tau * f * t)), 0);
-        return (.07 * metal + .25 * (Math.random() * 2 - 1));
+        const noise = Math.random() * 2 - 1;
+        const shapedNoise = noise - hat.noiseDifference * previousHatNoise;
+        previousHatNoise = noise;
+        return hat.metalLevel * metal + hat.noiseLevel * shapedNoise;
       }),
       this.buffer(1.8, t => {
         const f = 170 + variant * 63;
@@ -562,7 +575,7 @@ class Audio {
     const attack = pad && gate !== null ? Math.min(configuredAttack, gate * .72) : configuredAttack;
     const hold = 0;
     const release = drum ? .012 : releaseTime(track.release, index);
-    const decay = drum ? drumDecayTime(track.decay, index) : .025 + track.decay ** 2 * 2.4;
+    const decay = drum ? drumDecayTime(track.decay, index, track.patch) : .025 + track.decay ** 2 * 2.4;
     const sustain = Math.max(.00012, (drum ? .00012 : peak * track.sustain));
     amp.gain.setValueAtTime(.0001, time);
     if (pad) amp.gain.linearRampToValueAtTime(peak, time + attack);
@@ -2482,7 +2495,7 @@ function dialValue(input, index, name) {
   if (name === 'sustain' && index < 4) display = Math.round(1000 * holdTime(value)) + ' ms';
   if (name === 'release') display = releaseTime(value, index).toFixed(2) + ' s';
   if (name === 'tuning') display = (Math.round((value - .5) * 24) >= 0 ? '+' : '') + Math.round((value - .5) * 24) + ' st';
-  if (name === 'decay' && index < 4) display = Math.round(drumDecayTime(value, index) * 1000) + ' ms';
+  if (name === 'decay' && index < 4) display = Math.round(drumDecayTime(value, index, state.tracks[index].patch) * 1000) + ' ms';
   if (name === 'pitch') display = index === 7 && state.tracks[7].sampleId
     ? ((state.tracks[7].sampleTranspose ?? 0) > 0 ? '+' : '') + (state.tracks[7].sampleTranspose ?? 0) + ' st'
     : noteName(noteStep(index)?.notes[0] ?? state.tracks[index].notePitch ?? roots[index]);
@@ -2721,8 +2734,8 @@ function applyTheme(dark) {
   button.textContent = dark ? '☀︎ Light mode' : '☾ Dark mode';
   button.title = dark ? 'Switch to light mode' : 'Switch to dark mode';
 }
-let darkMode = false;
-try { darkMode = localStorage.getItem('dimi-theme') === 'dark'; } catch {}
+let darkMode = true;
+try { darkMode = localStorage.getItem('dimi-theme') !== 'light'; } catch {}
 applyTheme(darkMode);
 $('themeToggle').onclick = () => {
   $('optionsMenu').open = false;
