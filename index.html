@@ -403,9 +403,6 @@ class Audio {
       const bass = index === 4;
       const filter = bass ? null : ctx.createBiquadFilter();
       const filterSlope = bass ? null : ctx.createBiquadFilter();
-      // Bass voices share the live cutoff and resonance controls, with independent note envelopes.
-      const bassCutoff = bass ? ctx.createConstantSource() : null;
-      const bassResonance = bass ? ctx.createConstantSource() : null;
       const drive = index < 5 ? ctx.createGain() : null;
       const clean = drive ? ctx.createGain() : null;
       const volume = ctx.createGain();
@@ -421,15 +418,7 @@ class Audio {
       chorusDepth.gain.value = .008;
       chorusOsc.connect(chorusDepth).connect(chorus.delayTime);
       chorusOsc.start();
-      let tone = input;
-      if (bass) {
-        bassCutoff.offset.value = 320;
-        bassResonance.offset.value = 0;
-        bassCutoff.start();
-        bassResonance.start();
-      } else {
-        tone = input.connect(filter).connect(filterSlope);
-      }
+      const tone = bass ? input : input.connect(filter).connect(filterSlope);
       if (drive) {
         const shaper = ctx.createWaveShaper();
         // Keep the drive input inside the curve's range on typical hits.
@@ -459,7 +448,7 @@ class Audio {
         depth.connect(filterSlope.detune);
       }
       lfo.start();
-      return { input, filter, filterSlope, bassCutoff, bassResonance, drive, clean, volume, dry, echo, space, chorusMix, lfo, depth };
+      return { input, filter, filterSlope, drive, clean, volume, dry, echo, space, chorusMix, lfo, depth };
     });
     this.resetEffects();
   }
@@ -569,10 +558,8 @@ class Audio {
     const bass = index === 4;
     const frequency = filterFrequency(track.cutoff, index, track.filterType);
     if (bass) {
-      smooth(channel.bassCutoff.offset, frequency);
-      smooth(channel.bassResonance.offset, .25 + 15 * track.resonance);
       for (const voice of this.voices) {
-        if (voice.index === 4) voice.setBassFilterType(track.filterType);
+        voice.updateBassFilter?.(track, frequency, now);
       }
     } else {
       channel.filter.type = track.filterType;
@@ -603,41 +590,38 @@ class Audio {
     const filter = this.ctx.createBiquadFilter();
     const slope = this.ctx.createBiquadFilter();
     const modulation = this.ctx.createGain();
-    const setType = type => {
-      if (filter.type === type) return;
-      filter.type = type;
-      slope.type = type;
+    const stages = [filter, slope];
+    const update = (settings, frequency, now) => {
+      for (const stage of stages) {
+        if (stage.type !== settings.filterType) stage.type = settings.filterType;
+        stage.frequency.setTargetAtTime(frequency, now, .018);
+      }
+      filter.Q.setTargetAtTime(.25 + 15 * settings.resonance, now, .018);
     };
-    setType(track.filterType);
-    for (const stage of [filter, slope]) {
-      stage.frequency.value = 0;
-      channel.bassCutoff.connect(stage.frequency);
+    const frequency = filterFrequency(track.cutoff, 4, track.filterType);
+    for (const stage of stages) {
+      stage.type = track.filterType;
+      stage.frequency.value = frequency;
       modulation.connect(stage.detune);
     }
-    filter.Q.value = 0;
+    filter.Q.value = .25 + 15 * track.resonance;
     slope.Q.value = -3;
-    channel.bassResonance.connect(filter.Q);
-    modulation.gain.value = 1;
     channel.depth.connect(modulation);
     if (track.filterType === 'lowpass') {
       const accent = clamp((velocity - .7) / .3, 0, 1);
-      const sweep = 1350 + 1050 * accent;
+      const sweep = 1850 + 950 * accent;
       const decay = .025 + .24 * track.decay ** 2;
-      for (const stage of [filter, slope]) {
+      for (const stage of stages) {
         stage.detune.setValueAtTime(sweep, time);
         stage.detune.setTargetAtTime(0, time, decay);
       }
     }
     filter.connect(slope).connect(destination);
     return {
-      input: filter, setType,
+      input: filter, update,
       disconnect: () => {
         channel.depth.disconnect(modulation);
-        channel.bassResonance.disconnect(filter.Q);
-        for (const stage of [filter, slope]) {
-          channel.bassCutoff.disconnect(stage.frequency);
-          stage.disconnect();
-        }
+        for (const stage of stages) stage.disconnect();
         modulation.disconnect();
       }
     };
@@ -748,7 +732,7 @@ class Audio {
     let stopped = false;
     let sampleCutoff = Infinity;
     const voice = {
-      index, sample, startTime: time, setBassFilterType: bassTone?.setType,
+      index, sample, startTime: time, updateBassFilter: bassTone?.update,
       activeAt: at => sample && at >= time && at < Math.min(sampleCutoff, sampleTime + Math.max(0, sampleDuration - samplePosition) / sampleRate),
       retriggerAt: at => {
         if (!sample || at >= sampleCutoff) return;
@@ -1638,7 +1622,7 @@ function technoPattern(tracks) {
 function hypnoticSession(tracks) {
   Object.assign(tracks[0], { length: 1, volume: .89, cutoff: .58, decay: .65, character: .08 });
   Object.assign(tracks[4], {
-    length: 1, patch: 0, volume: .86, cutoff: .37, decay: .4, release: .14,
+    length: 1, patch: 0, volume: .86, cutoff: .44, decay: .4, release: .14,
     delay: 0, reverb: 0, resonance: .52, rate: .14, depth: .10
   });
   Object.assign(tracks[5], {
@@ -1648,9 +1632,9 @@ function hypnoticSession(tracks) {
   return [
     [0, 4, 8, 12].map(at => filled(at, [36], 1, 1)),
     [], [], [],
-    [filled(2, [33], 1.6, .96), filled(5, [33], .8, .72),
+    [filled(2, [33], 1.6, .96), filled(5, [45], .8, .72),
       filled(7, [45], .75, .88), filled(10, [33], 1.5, .98),
-      filled(13, [36], .75, .72), filled(14, [33], 1.5, .91)],
+      filled(13, [48], .75, .72), filled(14, [33], 1.5, .91)],
     [3, 10, 15, 19, 26, 31].map((at, i) =>
       filled(at, [52], .7, i % 3 === 0 ? .66 : .36)),
     [], []
