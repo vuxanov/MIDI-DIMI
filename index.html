@@ -362,10 +362,7 @@ const drumDecayTime = (value, index, patch) => {
   const decay = [.035, .025, .012, .025][index] * ([30, 20, 48, 32][index] ** value);
   return index === 2 ? decay * hatSounds[patch].decayScale : decay;
 };
-const releaseTime = (value, index) => {
-  const seconds = .025 + value ** 2 * (index < 4 ? .65 : index >= 6 ? 5 : 2.7);
-  return index === 4 ? Math.max(.045, seconds) : seconds;
-};
+const releaseTime = (value, index) => .025 + value ** 2 * (index < 4 ? .65 : index >= 6 ? 5 : 2.7);
 const lfoRate = (value, tempo) => tempo / 240 * 2 ** (value * 8 - 3);
 const clamp = (value, minimum, maximum) => Math.min(maximum, Math.max(minimum, value));
 
@@ -566,7 +563,6 @@ class Audio {
     amp.connect(channel.input);
     const sources = [];
     const drum = index < 4;
-    const bass = index === 4;
     const texture = index === 7;
     const sample = texture && Boolean(track.sampleId);
     const sampleMode = gate === null ? 'gate' : track.sampleMode === 'full' ? 'full' : 'restart';
@@ -688,7 +684,6 @@ class Audio {
         stopped = true;
         const earliest = gate === null && !drum ? minimumLiveGate : .006;
         const end = hard ? at + .009 : Math.max(at, time + earliest);
-        const sourceEnd = Math.min(sampleCutoff, end + (hard ? .014 : release));
         if (end < time) {
           amp.gain.cancelScheduledValues(at);
           amp.gain.setValueAtTime(0, at);
@@ -703,16 +698,11 @@ class Audio {
               : peak * (sustain / peak) ** clamp((elapsed - attack - hold) / decay, 0, 1);
             amp.gain.cancelScheduledValues(end);
             if (pad && elapsed < attack) amp.gain.linearRampToValueAtTime(level, end);
-            else if (bass && elapsed < attack + hold + decay) amp.gain.exponentialRampToValueAtTime(level, end);
             else amp.gain.setValueAtTime(level, end);
           }
-          if (bass && !hard) {
-            amp.gain.exponentialRampToValueAtTime(.00001, sourceEnd);
-            amp.gain.setValueAtTime(0, sourceEnd);
-          } else {
-            amp.gain.setTargetAtTime(.0001, end, hard ? .003 : release / 5);
-          }
+          amp.gain.setTargetAtTime(.0001, end, hard ? .003 : release / 5);
         }
+        const sourceEnd = Math.min(sampleCutoff, end + (hard ? .014 : release));
         if (sample) sampleCutoff = sourceEnd;
         for (const source of sources) source.stop(sourceEnd);
       }
@@ -1588,13 +1578,13 @@ function session(preset) {
     volume: [.86,.56,.49,.43,.63,.49,.57,.38][i], mute: false,
     cutoff: [.7,.86,.96,.75,.54,.65,.68,.57][i], delay: [0,.10,.05,.23,.07,.32,.25,.2][i],
     reverb: [0,.15,.12,.27,.04,.27,.47,.52][i], resonance: i === 4 ? .18 : .04,
-    decay: [.68,.44,.27,.36,.39,.31,.75,.68][i], character: i < 4 ? .4 : i === 4 ? 0 : .27,
+    decay: [.68,.44,.27,.36,.39,.31,.75,.68][i], character: i >= 5 ? .27 : .4,
     attack: i >= 6 ? .56 : .04, sustain: i >= 6 ? .69 : i === 4 ? .48 : .22,
     release: i >= 6 ? .77 : .21, rate: i === 4 ? .69 : .1,
     depth: i === 4 ? .24 : i >= 6 ? .36 : 0
   }));
   if (preset === 'blank') {
-    tracks.forEach((track, index) => Object.assign(track, defaultEffects, { length: 1, character: index < 4 ? .4 : 0 }));
+    tracks.forEach((track, index) => Object.assign(track, defaultEffects, { length: 1, character: index < 5 ? .4 : 0 }));
     return { preset, tempo: 128, tracks };
   }
   let pattern;
