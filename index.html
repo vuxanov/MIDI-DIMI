@@ -354,6 +354,11 @@ function cutoff(value, index) {
 const attackTime = (value, index) => (index === 4 ? .008 : .003)
   + value ** 2 * (index < 4 ? .17 : index === 7 ? .55 : 1.4);
 const holdTime = value => .22 * value ** 2;
+const kickSounds = [
+  { fundamental: 43, pitchDrop: 90, sweep: .041, decayScale: 1.15 }, // Deep
+  { fundamental: 63, pitchDrop: 205, sweep: .017, decayScale: .64 }, // Tight
+  { fundamental: 55, pitchDrop: 135, sweep: .052, decayScale: 1 } // Hard
+];
 const hatSounds = [
   { decayScale: .60, metalLevel: .035, noiseLevel: .28, noiseDifference: .15 }, // Closed
   { decayScale: 1.0, metalLevel: .04, noiseLevel: .34, noiseDifference: .88 }, // Bright
@@ -361,7 +366,9 @@ const hatSounds = [
 ];
 const drumDecayTime = (value, index, patch) => {
   const decay = [.035, .025, .012, .025][index] * ([30, 20, 48, 32][index] ** value);
-  return index === 2 ? decay * hatSounds[patch].decayScale : decay;
+  if (index === 0) return decay * kickSounds[patch].decayScale;
+  if (index === 2) return decay * hatSounds[patch].decayScale;
+  return decay;
 };
 const releaseTime = (value, index) => .025 + value ** 2 * (index < 4 ? .65 : index >= 6 ? 5 : 2.7);
 const lfoRate = (value, tempo) => tempo / 240 * 2 ** (value * 8 - 3);
@@ -481,12 +488,12 @@ class Audio {
   drums(variant) {
     let previous = 0;
     let previousHatNoise = 0;
+    const kick = kickSounds[variant];
     const hat = hatSounds[variant];
     return [
       this.buffer(2.2, t => {
-        const fundamental = 45 + variant * 5;
-        const sweep = .034 + variant * .009;
-        const phase = tau * (fundamental * t + 135 * sweep * (1 - Math.exp(-t / sweep)));
+        const { fundamental, pitchDrop, sweep } = kick;
+        const phase = tau * (fundamental * t + pitchDrop * sweep * (1 - Math.exp(-t / sweep)));
         return Math.tanh(1.4 * Math.sin(phase)) * Math.min(1, t * 900);
       }),
       this.buffer(1.4, t => {
