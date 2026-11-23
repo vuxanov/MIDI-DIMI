@@ -338,7 +338,7 @@ function filterFrequency(value, index, type) {
   return cutoff(value, index);
 }
 const drumBodyLevels = [.50, .34, .31, .37];
-const voiceLevels = [2.25, 1.49, 1.10, .92, 1.05, .48, .33, .89];
+const voiceLevels = [3.91, 1.49, 1.10, .92, .62, .48, .33, .89];
 const synthWaveforms = [
   ['sawtooth', 'triangle', 'square'],
   ['triangle', 'sawtooth', 'sine'],
@@ -351,8 +351,7 @@ function cutoff(value, index) {
   const sweep = (value - cutoffKnee) / (1 - cutoffKnee);
   return floor * (18000 / floor) ** (sweep ** 1.15);
 }
-const attackTime = (value, index) => (index === 4 ? .008 : .003)
-  + value ** 2 * (index < 4 ? .17 : index === 7 ? .55 : 1.4);
+const attackTime = (value, index) => .003 + value ** 2 * (index < 4 ? .17 : index === 7 ? .55 : 1.4);
 const holdTime = value => .22 * value ** 2;
 const hatSounds = [
   { decayScale: .60, metalLevel: .035, noiseLevel: .28, noiseDifference: .15 }, // Closed
@@ -375,14 +374,14 @@ class Audio {
     this.ctx = new AudioContext({ latencyHint: 'interactive' });
     const ctx = this.ctx;
     const master = ctx.createGain();
-    master.gain.value = .66;
+    master.gain.value = 1;
     const limiter = ctx.createWaveShaper();
     // A fixed soft knee limits peaks without gain reduction carrying into later hits.
     limiter.curve = Float32Array.from({ length: 8193 }, (_, index) => {
       const input = index / 4096 - 1;
       const magnitude = Math.abs(input);
-      return magnitude <= .82 ? input
-        : Math.sign(input) * (.82 + .16 * Math.tanh((magnitude - .82) / .16));
+      return magnitude <= .7 ? input
+        : Math.sign(input) * (.7 + .28 * Math.tanh((magnitude - .7) / .28));
     });
     limiter.oversample = '2x';
     const monitor = ctx.createGain();
@@ -399,11 +398,9 @@ class Audio {
     this.samples = new Map();
     this.channels = settings.map((_, index) => {
       const input = ctx.createGain();
-      const bass = index === 4;
-      const filter = bass ? null : ctx.createBiquadFilter();
-      const filterSlope = bass ? null : ctx.createBiquadFilter();
-      const drive = index < 5 ? ctx.createGain() : null;
-      const clean = drive ? ctx.createGain() : null;
+      const filter = ctx.createBiquadFilter();
+      const filterSlope = ctx.createBiquadFilter();
+      const shaper = ctx.createWaveShaper();
       const volume = ctx.createGain();
       const dry = ctx.createGain();
       const echo = ctx.createGain();
@@ -417,37 +414,18 @@ class Audio {
       chorusDepth.gain.value = .008;
       chorusOsc.connect(chorusDepth).connect(chorus.delayTime);
       chorusOsc.start();
-      const tone = bass ? input : input.connect(filter).connect(filterSlope);
-      if (drive) {
-        const shaper = ctx.createWaveShaper();
-        // Keep the drive input inside the curve's range on typical hits.
-        const inputTrim = ctx.createGain();
-        const outputTrim = ctx.createGain();
-        inputTrim.gain.value = .4;
-        outputTrim.gain.value = 2.5;
-        clean.gain.value = 1;
-        drive.gain.value = 0;
-        shaper.curve = Float32Array.from({ length: 4097 }, (_, i) =>
-          Math.tanh(1.5 * (i / 2048 - 1)) / 1.5);
-        shaper.oversample = '2x';
-        tone.connect(clean).connect(volume);
-        tone.connect(inputTrim).connect(shaper).connect(outputTrim).connect(drive).connect(volume);
-      } else {
-        tone.connect(volume);
-        tone.connect(chorus).connect(chorusMix).connect(volume);
-      }
+      input.connect(filter).connect(filterSlope).connect(shaper).connect(volume);
       volume.connect(dry).connect(master);
+      shaper.connect(chorus).connect(chorusMix).connect(volume);
       volume.connect(echo);
       volume.connect(space);
       const lfo = ctx.createOscillator();
       const depth = ctx.createGain();
       lfo.connect(depth);
-      if (!bass) {
-        depth.connect(filter.detune);
-        depth.connect(filterSlope.detune);
-      }
+      depth.connect(filter.detune);
+      depth.connect(filterSlope.detune);
       lfo.start();
-      return { input, filter, filterSlope, drive, clean, volume, dry, echo, space, chorusMix, lfo, depth };
+      return { input, filter, filterSlope, shaper, volume, dry, echo, space, chorusMix, lfo, depth };
     });
     this.resetEffects();
   }
@@ -507,7 +485,7 @@ class Audio {
         const fundamental = 45 + variant * 5;
         const sweep = .034 + variant * .009;
         const phase = tau * (fundamental * t + 135 * sweep * (1 - Math.exp(-t / sweep)));
-        return Math.sin(phase) * Math.min(1, t * 900);
+        return Math.tanh(1.4 * Math.sin(phase)) * Math.min(1, t * 900);
       }),
       this.buffer(1.4, t => {
         const noise = Math.random() * 2 - 1;
@@ -554,21 +532,12 @@ class Audio {
       smooth(this.effects.delay.delayTime, 60 / tempo * .75);
       this.tempo = tempo;
     }
-    const bass = index === 4;
+    channel.filter.type = track.filterType;
+    channel.filterSlope.type = track.filterType;
     const frequency = filterFrequency(track.cutoff, index, track.filterType);
-    if (bass) {
-      for (const voice of this.voices) {
-        voice.updateBassFilter?.(track, frequency, now);
-      }
-    } else {
-      channel.filter.type = track.filterType;
-      channel.filterSlope.type = track.filterType;
-      smooth(channel.filter.frequency, frequency);
-      smooth(channel.filterSlope.frequency, frequency);
-      smooth(channel.filter.Q, .25 + 16 * track.resonance + 2.5 * track.depth);
-      smooth(channel.filter.detune, -1450 * track.depth);
-      smooth(channel.filterSlope.detune, -1450 * track.depth);
-    }
+    smooth(channel.filter.frequency, frequency);
+    smooth(channel.filterSlope.frequency, frequency);
+    smooth(channel.filter.Q, .25 + 16 * track.resonance + 2.5 * track.depth);
     smooth(channel.volume.gain, track.mute ? 0 : track.volume ** 1.6);
     const delayAmount = track.delay ** .75;
     const reverbAmount = track.reverb ** .75;
@@ -577,53 +546,16 @@ class Audio {
     smooth(channel.echo.gain, 1.35 * delayAmount / wetWeight);
     smooth(channel.space.gain, 2 * reverbAmount / wetWeight);
     smooth(channel.chorusMix.gain, index >= 5 ? track.character ** .75 * 1.3 : 0);
-    if (channel.drive) {
-      smooth(channel.drive.gain, track.character);
-      smooth(channel.clean.gain, 1 - track.character);
+    if (index < 5 && channel.character !== track.character) {
+      const drive = track.character * 7;
+      channel.shaper.curve = drive < .01 ? null : Float32Array.from({ length: 1024 }, (_, i) =>
+        Math.tanh((i / 511.5 - 1) * (1 + drive)) / Math.tanh(1 + drive));
+      channel.character = track.character;
     }
     smooth(channel.lfo.frequency, lfoRate(track.rate, tempo));
-    smooth(channel.depth.gain, (bass ? 2800 : 4200) * track.depth);
-  }
-
-  bassVoice(channel, track, time, velocity, destination) {
-    const filter = this.ctx.createBiquadFilter();
-    const slope = this.ctx.createBiquadFilter();
-    const modulation = this.ctx.createGain();
-    const stages = [filter, slope];
-    const update = (settings, frequency, now) => {
-      for (const stage of stages) {
-        if (stage.type !== settings.filterType) stage.type = settings.filterType;
-        stage.frequency.setTargetAtTime(frequency, now, .018);
-      }
-      filter.Q.setTargetAtTime(.25 + 15 * settings.resonance, now, .018);
-    };
-    const frequency = filterFrequency(track.cutoff, 4, track.filterType);
-    for (const stage of stages) {
-      stage.type = track.filterType;
-      stage.frequency.value = frequency;
-      modulation.connect(stage.detune);
-    }
-    filter.Q.value = .25 + 15 * track.resonance;
-    slope.Q.value = -3;
-    channel.depth.connect(modulation);
-    if (track.filterType === 'lowpass') {
-      const accent = clamp((velocity - .7) / .3, 0, 1);
-      const sweep = 1850 + 950 * accent;
-      const decay = .025 + .24 * track.decay ** 2;
-      for (const stage of stages) {
-        stage.detune.setValueAtTime(sweep, time);
-        stage.detune.setTargetAtTime(0, time, decay);
-      }
-    }
-    filter.connect(slope).connect(destination);
-    return {
-      input: filter, update,
-      disconnect: () => {
-        channel.depth.disconnect(modulation);
-        for (const stage of stages) stage.disconnect();
-        modulation.disconnect();
-      }
-    };
+    smooth(channel.depth.gain, 4200 * track.depth);
+    smooth(channel.filter.detune, -1450 * track.depth);
+    smooth(channel.filterSlope.detune, -1450 * track.depth);
   }
 
   hit(index, track, notes, time, gate, velocity = 1) {
@@ -635,7 +567,6 @@ class Audio {
     const sources = [];
     const drum = index < 4;
     const bass = index === 4;
-    const bassTone = bass ? this.bassVoice(channel, track, time, velocity, amp) : null;
     const texture = index === 7;
     const sample = texture && Boolean(track.sampleId);
     const sampleMode = gate === null ? 'gate' : track.sampleMode === 'full' ? 'full' : 'restart';
@@ -715,7 +646,7 @@ class Audio {
       const detunes = index >= 5 ? [-7, 7] : [0];
       const layers = ctx.createGain();
       layers.gain.value = waveformLevel[waveform] / Math.sqrt(detunes.length);
-      layers.connect(bassTone?.input ?? amp);
+      layers.connect(amp);
       for (const note of notes) {
         for (const cents of detunes) {
           const osc = ctx.createOscillator();
@@ -731,7 +662,7 @@ class Audio {
     let stopped = false;
     let sampleCutoff = Infinity;
     const voice = {
-      index, sample, startTime: time, updateBassFilter: bassTone?.update,
+      index, sample, startTime: time,
       activeAt: at => sample && at >= time && at < Math.min(sampleCutoff, sampleTime + Math.max(0, sampleDuration - samplePosition) / sampleRate),
       retriggerAt: at => {
         if (!sample || at >= sampleCutoff) return;
@@ -791,7 +722,6 @@ class Audio {
     for (const source of sources) {
       source.onended = () => {
         if (--remaining) return;
-        bassTone?.disconnect();
         amp.disconnect();
         this.voices.delete(voice);
       };
@@ -1619,10 +1549,10 @@ function technoPattern(tracks) {
 }
 
 function hypnoticSession(tracks) {
-  Object.assign(tracks[0], { length: 1, volume: .89, cutoff: .58, decay: .65, character: .08 });
+  Object.assign(tracks[0], { length: 1, volume: .89, cutoff: .58, decay: .65 });
   Object.assign(tracks[4], {
-    length: 1, patch: 0, volume: .86, cutoff: .44, decay: .4, release: .14,
-    delay: 0, reverb: 0, resonance: .52, rate: .14, depth: .10
+    length: 1, patch: 1, volume: .83, cutoff: .41, decay: .4, release: .11,
+    delay: 0, reverb: 0, resonance: .04, rate: .06, depth: .13
   });
   Object.assign(tracks[5], {
     length: 2, patch: 0, volume: .49, cutoff: .48, decay: .21, resonance: .21,
@@ -1631,9 +1561,7 @@ function hypnoticSession(tracks) {
   return [
     [0, 4, 8, 12].map(at => filled(at, [36], 1, 1)),
     [], [], [],
-    [filled(2, [33], 1.6, .96), filled(5, [45], .8, .72),
-      filled(7, [45], .75, .88), filled(10, [33], 1.5, .98),
-      filled(13, [48], .75, .72), filled(14, [33], 1.5, .91)],
+    [2, 6, 10, 14].map(at => filled(at, [33], 1.65, .83)),
     [3, 10, 15, 19, 26, 31].map((at, i) =>
       filled(at, [52], .7, i % 3 === 0 ? .66 : .36)),
     [], []
