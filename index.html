@@ -1578,13 +1578,13 @@ function session(preset) {
     volume: [.86,.56,.49,.43,.63,.49,.57,.38][i], mute: false,
     cutoff: [.7,.86,.96,.75,.54,.65,.68,.57][i], delay: [0,.10,.05,.23,.07,.32,.25,.2][i],
     reverb: [0,.15,.12,.27,.04,.27,.47,.52][i], resonance: i === 4 ? .18 : .04,
-    decay: [.68,.44,.27,.36,.39,.31,.75,.68][i], character: i >= 5 ? .27 : .4,
+    decay: [.68,.44,.27,.36,.39,.31,.75,.68][i], character: i < 4 ? .4 : i === 4 ? 0 : .27,
     attack: i >= 6 ? .56 : .04, sustain: i >= 6 ? .69 : i === 4 ? .48 : .22,
     release: i >= 6 ? .77 : .21, rate: i === 4 ? .69 : .1,
     depth: i === 4 ? .24 : i >= 6 ? .36 : 0
   }));
   if (preset === 'blank') {
-    tracks.forEach((track, index) => Object.assign(track, defaultEffects, { length: 1, character: index < 5 ? .4 : 0 }));
+    tracks.forEach((track, index) => Object.assign(track, defaultEffects, { length: 1, character: index < 4 ? .4 : 0 }));
     return { preset, tempo: 128, tracks };
   }
   let pattern;
