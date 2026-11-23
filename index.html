@@ -216,7 +216,6 @@ details p {max-width:78ch}
 <button id="saveProject" type="button">Save project</button>
 <button id="exportMIDI" type="button">Export MIDI</button>
 <button id="openProject" type="button">Open project</button>
-<button id="loadHypnotic" type="button">Load Hypnotic</button>
 <button id="resetActiveFX" type="button">Reset active instrument</button>
 <button id="resetFX" type="button">Reset all effects</button>
 <button id="resetBars" type="button">× Delete everything</button>
@@ -2321,7 +2320,6 @@ function applyPreset(name) {
   renderPattern();
   save();
   if ($('status').textContent.startsWith('Queued')) status('');
-  playbackStatus();
 }
 function choosePreset(name) {
   if (playing) {
@@ -2922,10 +2920,6 @@ $('projectFile').onchange = async event => {
   } finally {
     event.target.value = '';
   }
-};
-$('loadHypnotic').onclick = () => {
-  $('optionsMenu').open = false;
-  choosePreset('hypnotic');
 };
 $('play').onclick = () => transport();
 $('record').onclick = toggleRecord;
