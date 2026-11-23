@@ -362,7 +362,10 @@ const drumDecayTime = (value, index, patch) => {
   const decay = [.035, .025, .012, .025][index] * ([30, 20, 48, 32][index] ** value);
   return index === 2 ? decay * hatSounds[patch].decayScale : decay;
 };
-const releaseTime = (value, index) => .025 + value ** 2 * (index < 4 ? .65 : index >= 6 ? 5 : 2.7);
+const releaseTime = (value, index) => {
+  const seconds = .025 + value ** 2 * (index < 4 ? .65 : index >= 6 ? 5 : 2.7);
+  return index === 4 ? Math.max(.045, seconds) : seconds;
+};
 const lfoRate = (value, tempo) => tempo / 240 * 2 ** (value * 8 - 3);
 const clamp = (value, minimum, maximum) => Math.min(maximum, Math.max(minimum, value));
 
@@ -563,6 +566,7 @@ class Audio {
     amp.connect(channel.input);
     const sources = [];
     const drum = index < 4;
+    const bass = index === 4;
     const texture = index === 7;
     const sample = texture && Boolean(track.sampleId);
     const sampleMode = gate === null ? 'gate' : track.sampleMode === 'full' ? 'full' : 'restart';
@@ -684,6 +688,7 @@ class Audio {
         stopped = true;
         const earliest = gate === null && !drum ? minimumLiveGate : .006;
         const end = hard ? at + .009 : Math.max(at, time + earliest);
+        const sourceEnd = Math.min(sampleCutoff, end + (hard ? .014 : release));
         if (end < time) {
           amp.gain.cancelScheduledValues(at);
           amp.gain.setValueAtTime(0, at);
@@ -698,11 +703,16 @@ class Audio {
               : peak * (sustain / peak) ** clamp((elapsed - attack - hold) / decay, 0, 1);
             amp.gain.cancelScheduledValues(end);
             if (pad && elapsed < attack) amp.gain.linearRampToValueAtTime(level, end);
+            else if (bass && elapsed < attack + hold + decay) amp.gain.exponentialRampToValueAtTime(level, end);
             else amp.gain.setValueAtTime(level, end);
           }
-          amp.gain.setTargetAtTime(.0001, end, hard ? .003 : release / 5);
+          if (bass && !hard) {
+            amp.gain.exponentialRampToValueAtTime(.00001, sourceEnd);
+            amp.gain.setValueAtTime(0, sourceEnd);
+          } else {
+            amp.gain.setTargetAtTime(.0001, end, hard ? .003 : release / 5);
+          }
         }
-        const sourceEnd = Math.min(sampleCutoff, end + (hard ? .014 : release));
         if (sample) sampleCutoff = sourceEnd;
         for (const source of sources) source.stop(sourceEnd);
       }
