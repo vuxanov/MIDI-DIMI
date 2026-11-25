@@ -1520,11 +1520,11 @@ function setupMIDI(actions) {
         const index = row * 8 + i;
         const selected = i === state.selected;
         if (modern) {
-          send(176, 13 + index, selected ? 5 : 21);
+          send(176, 13 + index, selected ? 13 : 5);
         } else if (access.sysexEnabled) {
-          knobLEDs.push(index, selected ? 15 : 28);
+          knobLEDs.push(index, selected ? 62 : 15);
         } else {
-          send(176 + legacyChannel, [13, 29, 49][row] + i, selected ? 15 : 28);
+          send(144 + legacyChannel, [13, 29, 49][row] + i, selected ? 62 : 15);
         }
       }
     }
