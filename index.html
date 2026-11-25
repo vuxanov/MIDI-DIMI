@@ -70,9 +70,6 @@ kbd {font:inherit;opacity:.6}
 #mixer {display:grid;grid-template-columns:repeat(8,minmax(95px,1fr));min-width:760px;border:1px solid}
 .channel {display:grid;justify-items:center;gap:6px;padding:6px;text-align:center}
 .channel+.channel {border-left:1px solid}
-.filter-toggle {font:inherit;border:0;min-height:0;padding:0;background:transparent;text-align:inherit;white-space:nowrap}
-.filter-toggle::after {content:" ▾";font-size:1.15em}
-.filter-toggle:hover {outline:0;text-decoration:underline}
 .track {width:100%;white-space:nowrap;padding-inline:2px;font-weight:600;overflow:hidden;text-overflow:ellipsis}
 .track-split {display:flex;width:100%;height:30px;min-width:0;align-self:end}
 .track-split .track {flex:1;min-width:0;border-right:0}
@@ -181,7 +178,6 @@ details p {max-width:78ch}
   #mixer {width:100%;grid-template-columns:repeat(8,minmax(0,1fr));min-width:0}
   .channel {grid-template-rows:repeat(3,20px) minmax(42px,1fr) 27px;min-width:0;gap:4px;padding:5px clamp(5px,1vw,8px)}
   .knob {grid-template-columns:20px minmax(0,1fr);align-items:center;justify-self:stretch;gap:4px;text-align:left;font-size:clamp(8px,1.05vw,10px)}
-  .filter-toggle {font-size:clamp(7px,.95vw,9px)}
   .dial {width:20px;height:20px}
   .dial::after {left:8px;top:2px;height:6px;transform-origin:50% 7px}
   .fader {height:0;min-height:100%;margin-block:0}
@@ -329,13 +325,23 @@ const tau = Math.PI * 2;
 const hz = note => 440 * 2 ** ((note - 69) / 12);
 const cutoffFloors = [42, 480, 1600, 320, 62, 240, 340, 560];
 const cutoffKnee = .08;
-const defaultFilterTypes = ['lowpass', 'highpass', 'highpass', 'highpass', 'lowpass', 'lowpass', 'lowpass', 'highpass'];
-function filterFrequency(value, index, type) {
-  if (type === 'highpass') {
+const legacyFilterTypes = ['lowpass', 'highpass', 'highpass', 'highpass', 'lowpass', 'lowpass', 'lowpass', 'highpass'];
+function filterFrequency(value, index) {
+  if (value > 0) {
     const maximum = [2400, 3000, 6500, 3800, 2400, 4000, 2200, 4500][index];
     return 12 * (maximum / 12) ** value;
   }
-  return cutoff(value, index);
+  return cutoff(1 + value, index);
+}
+const filterType = cutoff => cutoff < 0 ? 'lowpass' : cutoff > 0 ? 'highpass' : 'peaking';
+function updateFilter(stage, type, frequency, now) {
+  if (stage.type === type) {
+    stage.frequency.setTargetAtTime(frequency, now, .018);
+  } else {
+    stage.frequency.cancelScheduledValues(now);
+    stage.frequency.setValueAtTime(frequency, now);
+    stage.type = type;
+  }
 }
 const drumBodyLevels = [.50, .34, .31, .37];
 const voiceLevels = [3.91, 1.49, 1.10, .92, .78, .48, .33, .89];
@@ -542,16 +548,15 @@ class Audio {
       this.tempo = tempo;
     }
     const bass = index === 4;
-    const frequency = filterFrequency(track.cutoff, index, track.filterType);
+    const frequency = filterFrequency(track.cutoff, index);
     if (bass) {
       for (const voice of this.voices) {
         voice.updateBassFilter?.(track, frequency, now);
       }
     } else {
-      channel.filter.type = track.filterType;
-      channel.filterSlope.type = track.filterType;
-      smooth(channel.filter.frequency, frequency);
-      smooth(channel.filterSlope.frequency, frequency);
+      const type = filterType(track.cutoff);
+      updateFilter(channel.filter, type, frequency, now);
+      updateFilter(channel.filterSlope, type, frequency, now);
       smooth(channel.filter.Q, .25 + 16 * track.resonance + 2.5 * track.depth);
       smooth(channel.filter.detune, -1450 * track.depth);
       smooth(channel.filterSlope.detune, -1450 * track.depth);
@@ -580,22 +585,20 @@ class Audio {
     const modulation = this.ctx.createGain();
     const stages = [filter, slope];
     const update = (settings, frequency, now) => {
-      for (const stage of stages) {
-        if (stage.type !== settings.filterType) stage.type = settings.filterType;
-        stage.frequency.setTargetAtTime(frequency, now, .018);
-      }
+      const type = filterType(settings.cutoff);
+      for (const stage of stages) updateFilter(stage, type, frequency, now);
       filter.Q.setTargetAtTime(.25 + 15 * settings.resonance, now, .018);
     };
-    const frequency = filterFrequency(track.cutoff, 4, track.filterType);
+    const frequency = filterFrequency(track.cutoff, 4);
     for (const stage of stages) {
-      stage.type = track.filterType;
+      stage.type = filterType(track.cutoff);
       stage.frequency.value = frequency;
       modulation.connect(stage.detune);
     }
     filter.Q.value = .25 + 15 * track.resonance;
     slope.Q.value = -3;
     channel.depth.connect(modulation);
-    if (track.filterType === 'lowpass') {
+    if (track.cutoff < 0) {
       const accent = clamp((velocity - .7) / .3, 0, 1);
       const sweep = 1850 + 950 * accent;
       const decay = .025 + .24 * track.decay ** 2;
@@ -1515,12 +1518,13 @@ function setupMIDI(actions) {
     for (let row = 0; row < 3; row++) {
       for (let i = 0; i < 8; i++) {
         const index = row * 8 + i;
+        const selected = i === state.selected;
         if (modern) {
-          send(176, 13 + index, 21);
+          send(176, 13 + index, selected ? 5 : 21);
         } else if (access.sysexEnabled) {
-          knobLEDs.push(index, 28);
+          knobLEDs.push(index, selected ? 15 : 28);
         } else {
-          send(144 + legacyChannel, [13, 29, 49][row] + i, 28);
+          send(176 + legacyChannel, [13, 29, 49][row] + i, selected ? 15 : 28);
         }
       }
     }
@@ -1581,11 +1585,11 @@ const button = (text, callback, className = '') => Object.assign(document.create
 const pressed = (element, state) => element.setAttribute('aria-pressed', String(Boolean(state)));
 
 function technoPattern(tracks) {
-  Object.assign(tracks[0], { patch: 1, cutoff: .78, decay: .43 });
+  Object.assign(tracks[0], { patch: 1, cutoff: -.22, decay: .43 });
   Object.assign(tracks[1], { length: 2, patch: 1, volume: .42, decay: .24, delay: .02, reverb: .07 });
-  Object.assign(tracks[2], { length: 2, patch: 0, volume: .51, cutoff: .96, decay: .18, delay: .09, reverb: .06 });
-  Object.assign(tracks[3], { length: 2, patch: 1, volume: .55, cutoff: .81, decay: .30, delay: .17, reverb: .09 });
-  Object.assign(tracks[4], { patch: 1, volume: .59, cutoff: .53, decay: .31, release: .17, depth: 0 });
+  Object.assign(tracks[2], { length: 2, patch: 0, volume: .51, decay: .18, delay: .09, reverb: .06 });
+  Object.assign(tracks[3], { length: 2, patch: 1, volume: .55, decay: .30, delay: .17, reverb: .09 });
+  Object.assign(tracks[4], { patch: 1, volume: .59, cutoff: -.47, decay: .31, release: .17, depth: 0 });
   return [
     [0, 4, 8, 12].map(at => filled(at, [36], 1, 1)),
     [filled(12, [36], 1, .73), filled(23, [38], 1, .33), filled(28, [36], 1, .77)],
@@ -1601,13 +1605,13 @@ function technoPattern(tracks) {
 }
 
 function hypnoticSession(tracks) {
-  Object.assign(tracks[0], { length: 1, volume: .89, cutoff: .58, decay: .65 });
+  Object.assign(tracks[0], { length: 1, volume: .89, cutoff: -.42, decay: .65 });
   Object.assign(tracks[4], {
-    length: 1, patch: 1, volume: .83, cutoff: .41, decay: .4, release: .11,
+    length: 1, patch: 1, volume: .83, cutoff: -.59, decay: .4, release: .11,
     delay: 0, reverb: 0, resonance: .04, rate: .06, depth: .13
   });
   Object.assign(tracks[5], {
-    length: 2, patch: 0, volume: .49, cutoff: .48, decay: .21, resonance: .21,
+    length: 2, patch: 0, volume: .49, decay: .21, resonance: .21,
     delay: .31, reverb: .08, rate: .11, depth: .23
   });
   return [
@@ -1629,16 +1633,16 @@ const noteLengthText = gate => {
   const index = noteLengths.indexOf(gate);
   return index >= 0 ? noteLengthLabels[index] : Number((gate / 4).toFixed(2)) + ' bt';
 };
-const defaultEffects = { cutoff: .5, delay: 0, reverb: 0, resonance: 0, character: 0, depth: 0 };
+const defaultEffects = { cutoff: 0, delay: 0, reverb: 0, resonance: 0, character: 0, depth: 0 };
 
 function session(preset) {
   const ambient = preset === 'ambient';
   const hypnotic = preset === 'hypnotic';
   const tracks = names.map((_, i) => ({
     length: i >= 6 ? 4 : i >= 4 ? 2 : 1, steps: Array(64).fill(null), patch: 0, tuning: .5,
-    filterType: defaultFilterTypes[i], noteGate: defaultNoteLength(i),
+    noteGate: defaultNoteLength(i),
     volume: [.86,.56,.49,.43,.63,.49,.57,.38][i], mute: false,
-    cutoff: [.7,.86,.96,.75,.54,.65,.68,.57][i], delay: [0,.10,.05,.23,.07,.32,.25,.2][i],
+    cutoff: [-.3,.52,.62,.47,-.46,-.35,-.32,.44][i], delay: [0,.10,.05,.23,.07,.32,.25,.2][i],
     reverb: [0,.15,.12,.27,.04,.27,.47,.52][i], resonance: i === 4 ? .18 : .04,
     decay: [.68,.44,.27,.36,.39,.31,.75,.68][i], character: i >= 5 ? .27 : .4,
     attack: i >= 6 ? .56 : .04, sustain: i >= 6 ? .69 : i === 4 ? .48 : .22,
@@ -1647,13 +1651,13 @@ function session(preset) {
   }));
   if (preset === 'blank') {
     tracks.forEach((track, index) => Object.assign(track, defaultEffects, { length: 1, character: index < 5 ? .4 : 0 }));
-    return { preset, tempo: 128, tracks };
+    return { cutoffVersion: 1, preset, tempo: 128, tracks };
   }
   let pattern;
   if (hypnotic) {
     pattern = hypnoticSession(tracks);
   } else if (ambient) {
-    tracks[4].cutoff = .36;
+    tracks[4].cutoff = -.64;
     pattern = [
       [], [],
       [filled(10, [36], 1, .27)], [filled(15, [36], 1, .35)],
@@ -1665,11 +1669,8 @@ function session(preset) {
   } else {
     pattern = technoPattern(tracks);
   }
-  tracks.forEach((track, index) => {
-    if (track.filterType === 'highpass') track.cutoff = [.5, .52, .62, .47, .5, .5, .36, .44][index];
-  });
   pattern.forEach((events, index) => events.forEach(({ at, ...step }) => { tracks[index].steps[at] = step; }));
-  return { preset, tempo: ambient ? 86 : hypnotic ? 132 : 128, tracks };
+  return { cutoffVersion: 1, preset, tempo: ambient ? 86 : hypnotic ? 132 : 128, tracks };
 }
 
 function normalizeSample(buffer) {
@@ -1687,7 +1688,7 @@ function normalizeSample(buffer) {
 function samplePlaybackDefaults(track) {
   const root = track.notePitch ?? track.steps.find(Boolean)?.notes[0] ?? roots[7];
   Object.assign(track, { sampleRoot: root, sampleTranspose: 0, samplePlaybackVersion: 1, sampleMode: 'restart',
-    notePitch: root, octave: 0, filterType: 'lowpass', cutoff: 1, resonance: 0, depth: 0,
+    notePitch: root, octave: 0, cutoff: 0, resonance: 0, depth: 0,
     delay: 0, reverb: 0, character: 0, attack: 0, sustain: 1, release: .08 });
 }
 let recentSamples = [];
@@ -1964,13 +1965,24 @@ function sampleFromProject(project, id) {
 
 let localSound = true;
 try { localSound = localStorage.getItem('dimi-local-sound') !== 'off'; } catch {}
+function legacyCutoff(track, fallbackType) {
+  if (!Number.isFinite(track.cutoff)) return 0;
+  const type = ['lowpass', 'highpass'].includes(track.filterType) ? track.filterType : fallbackType;
+  const value = clamp(track.cutoff, 0, 1);
+  return type === 'highpass' ? value : value - 1;
+}
+
 let state = session('blank');
 try {
   const saved = JSON.parse(localStorage.getItem('dimi-session-v1'));
   if (saved?.tracks?.length === 8 && saved.tracks.every(track => track.steps?.length === 64)) state = saved;
 } catch {}
-for (const track of state.tracks) {
-  if (!['lowpass', 'highpass'].includes(track.filterType)) track.filterType = 'lowpass';
+if (state.cutoffVersion !== 1) {
+  for (const track of state.tracks) {
+    track.cutoff = legacyCutoff(track, 'lowpass');
+    delete track.filterType;
+  }
+  state.cutoffVersion = 1;
 }
 if (state.tracks[7].sampleId && !state.tracks[7].samplePlaybackVersion) samplePlaybackDefaults(state.tracks[7]);
 if (state.tracks[7].sampleId) rememberSample(state.tracks[7].sampleId, state.tracks[7].sampleName || 'Sample');
@@ -2060,18 +2072,18 @@ function projectContents() {
     if (!asset) throw new Error('Sample is still loading. Try Save project again.');
     samples[id] = { name: asset.name, data: asset.data };
   }
-  return JSON.stringify({ format: 'midi-dimi', version: 1, song: state, ...(id ? { samples } : {}) }, null, 2);
+  return JSON.stringify({ format: 'midi-dimi', version: 2, song: state, ...(id ? { samples } : {}) }, null, 2);
 }
 function readProject(text) {
   const project = JSON.parse(text);
-  if (project?.format !== 'midi-dimi' || project.version !== 1) throw new Error('Not a MIDI DIMI project.');
+  if (project?.format !== 'midi-dimi' || ![1, 2].includes(project.version)) throw new Error('Not a MIDI DIMI project.');
   const song = project.song;
   if (!song || !Number.isFinite(song.tempo) || song.tempo < 40 || song.tempo > 220 || !Array.isArray(song.tracks) || song.tracks.length !== 8) throw new Error('Invalid song data.');
   const defaults = session('blank');
   const tracks = song.tracks.map((source, i) => {
     if (!source || ![1, 2, 4].includes(source.length) || !Array.isArray(source.steps) || source.steps.length !== 64) throw new Error('Invalid track data.');
     const track = { ...defaults.tracks[i], length: source.length };
-    for (const name of ['volume', 'cutoff', 'delay', 'reverb', 'resonance', 'decay', 'character', 'attack', 'sustain', 'release', 'rate', 'depth', 'tuning', 'noteVelocity']) {
+    for (const name of ['volume', 'delay', 'reverb', 'resonance', 'decay', 'character', 'attack', 'sustain', 'release', 'rate', 'depth', 'tuning', 'noteVelocity']) {
       if (source[name] === undefined) continue;
       if (!Number.isFinite(source[name]) || source[name] < 0 || source[name] > 1) throw new Error('Invalid instrument setting.');
       track[name] = source[name];
@@ -2082,7 +2094,11 @@ function readProject(text) {
       if (!Number.isFinite(value) || value < low || value > high || (integer && !Number.isInteger(value))) throw new Error('Invalid note setting.');
       track[name] = value;
     }
-    track.filterType = ['lowpass', 'highpass'].includes(source.filterType) ? source.filterType : defaults.tracks[i].filterType;
+    if (source.cutoff !== undefined) {
+      const minimum = project.version === 1 ? 0 : -1;
+      if (!Number.isFinite(source.cutoff) || source.cutoff < minimum || source.cutoff > 1) throw new Error('Invalid cutoff setting.');
+      track.cutoff = project.version === 1 ? legacyCutoff(source, legacyFilterTypes[i]) : source.cutoff;
+    }
     track.mute = Boolean(source.mute);
     if (i === 7 && source.sampleId) {
       if (typeof source.sampleId !== 'string' || source.sampleId.length > 100) throw new Error('Invalid sample reference.');
@@ -2102,7 +2118,7 @@ function readProject(text) {
     if (track.sampleId && !track.samplePlaybackVersion) samplePlaybackDefaults(track);
     return track;
   });
-  return { preset: typeof song.preset === 'string' ? song.preset : 'blank', tempo: song.tempo, tracks };
+  return { cutoffVersion: 1, preset: typeof song.preset === 'string' ? song.preset : 'blank', tempo: song.tempo, tracks };
 }
 function loadProject(text) {
   const song = readProject(text);
@@ -2355,6 +2371,10 @@ function midiParameterValue(index, row, name, raw, relative) {
   const previous = midiKnobMotion.get(key);
   const motion = { raw, name, remainder: previous?.name === name ? previous.remainder : 0 };
   midiKnobMotion.set(key, motion);
+  if (name === 'cutoff') {
+    if (relative) return clamp(current + (raw - 64) / 50, -1, 1);
+    return raw < 64 ? (raw - 64) / 64 : (raw - 64) / 63;
+  }
   if (!count) return relative ? clamp(current + (name === 'pitch' && index === 7 && state.tracks[7].sampleId ? Math.sign(raw - 64) / 48 : (raw - 64) / 100), 0, 1) : raw / 127;
   let steps;
   if (relative) steps = Math.sign(raw - 64);
@@ -2549,15 +2569,15 @@ function dialValue(input, index, name) {
   if (name === 'patch' && index === 7) input.step = 1 / (textureSoundChoices().length - 1);
   if (name === 'pitch') input.step = index === 7 && state.tracks[7].sampleId ? 1 / 48 : .001;
   input.value = value;
-  input.parentElement.style.setProperty('--angle', `${Number(input.value) * 270 - 135}deg`);
+  input.parentElement.style.setProperty('--angle', `${name === 'cutoff' ? Number(input.value) * 135 : Number(input.value) * 270 - 135}deg`);
   let display = Math.round(value * 100) + '%';
-  if (name === 'cutoff') display = Math.round(filterFrequency(value, index, state.tracks[index].filterType)) + ' Hz';
+  if (name === 'cutoff') display = value === 0 ? 'Off' : (value < 0 ? 'Low-pass ' : 'High-pass ') + Math.round(filterFrequency(value, index)) + ' Hz';
   if (name === 'rate') display = lfoRate(value, state.tempo).toFixed(2) + ' Hz';
   if (name === 'attack') display = Math.round(1000 * attackTime(value, index)) + ' ms';
   if (name === 'sustain' && index < 4) display = Math.round(1000 * holdTime(value)) + ' ms';
   if (name === 'release') display = releaseTime(value, index).toFixed(2) + ' s';
   if (name === 'tuning') display = (Math.round((value - .5) * 24) >= 0 ? '+' : '') + Math.round((value - .5) * 24) + ' st';
-  if (name === 'decay' && index < 4) display = Math.round(drumDecayTime(value, index, state.tracks[index].patch) * 1000) + ' ms';
+  if (name === 'decay' && index < 4) display = Math.round(drumDecayTime(value, index) * 1000) + ' ms';
   if (name === 'pitch') display = index === 7 && state.tracks[7].sampleId
     ? ((state.tracks[7].sampleTranspose ?? 0) > 0 ? '+' : '') + (state.tracks[7].sampleTranspose ?? 0) + ' st'
     : noteName(noteStep(index)?.notes[0] ?? state.tracks[index].notePitch ?? roots[index]);
@@ -2567,11 +2587,8 @@ function dialValue(input, index, name) {
   input.setAttribute('aria-valuetext', display);
   const caption = input.parentElement.nextElementSibling;
   caption.textContent = name === 'cutoff'
-    ? 'Cutoff ' + (state.tracks[index].filterType === 'highpass' ? 'HP' : 'LP')
+    ? 'Cutoff ' + (value < 0 ? 'LP' : value > 0 ? 'HP' : 'Off')
     : page === 4 ? display : parameterLabel(name, index);
-  if (name === 'cutoff') {
-    caption.setAttribute('aria-label', names[index] + ' filter: ' + state.tracks[index].filterType + '. Switch filter type');
-  }
 }
 function renderMixer() {
   for (const element of $('pages').children) {
@@ -2588,21 +2605,13 @@ function renderMixer() {
       const ring = document.createElement('span');
       ring.className = 'dial';
       const input = Object.assign(document.createElement('input'), {
-        type: 'range', min: 0, max: 1, step: name === 'duration' ? 1 / (noteLengths.length - 1) : name === 'patch' ? 1 / (index === 7 ? textureSoundChoices().length - 1 : patches[index].length - 1) : .001
+        type: 'range', min: name === 'cutoff' ? -1 : 0, max: 1, step: name === 'duration' ? 1 / (noteLengths.length - 1) : name === 'patch' ? 1 / (index === 7 ? textureSoundChoices().length - 1 : patches[index].length - 1) : .001
       });
       input.disabled = false;
       input.dataset.param = name;
       input.setAttribute('aria-label', names[index] + ' ' + (parameterLabel(name, index)));
       ring.append(input);
-      const caption = document.createElement(name === 'cutoff' ? 'button' : 'span');
-      if (name === 'cutoff') {
-        caption.type = 'button';
-        caption.className = 'filter-toggle';
-        caption.onclick = () => {
-          setParam(index, 'filterType', track.filterType === 'highpass' ? 'lowpass' : 'highpass');
-          dialValue(input, index, name);
-        };
-      }
+      const caption = document.createElement('span');
       label.append(ring, caption);
       dialValue(input, index, name);
       input.oninput = () => {
@@ -2628,7 +2637,12 @@ function renderMixer() {
           if (!steps) return;
           drag.y -= steps * 8;
           input.value = clamp(parameterValue(index, name) + steps / (count - 1), 0, 1);
-        } else input.value = clamp(drag.value + delta / 160, 0, 1);
+        } else {
+          const increment = (1 - Number(input.min)) / 160;
+          const value = drag.value + delta * increment;
+          input.value = name === 'cutoff' && Math.abs(value) <= increment / 2
+            ? 0 : clamp(value, Number(input.min), 1);
+        }
         input.oninput();
       };
       input.onpointerup = input.onpointercancel = input.onlostpointercapture = event => {
