@@ -359,7 +359,9 @@ function cutoff(value, index) {
 }
 const attackTime = (value, index) => (index === 4 ? .008 : .003)
   + value ** 2 * (index < 4 ? .17 : index === 7 ? .55 : 1.4);
-const holdTime = value => .22 * value ** 2;
+const drumAttackTime = value => .002 + Math.max(0, value - .04) ** 2 * .17;
+const holdTime = value => .22 * Math.max(0, value - .22) ** 2;
+const drumReleaseTime = value => .012 + Math.max(0, value - .21) ** 2 * .65;
 const kickSounds = [
   { fundamental: 43, pitchDrop: 90, sweep: .041, decayScale: 1.15 }, // Deep
   { fundamental: 63, pitchDrop: 205, sweep: .017, decayScale: .64 }, // Tight
@@ -635,10 +637,10 @@ class Audio {
     let nextSampleTrigger = Infinity;
     const peak = Math.max(.00012, voiceLevels[index] * velocity / Math.sqrt(notes.length));
     const pad = index === 6;
-    const configuredAttack = drum ? .002 : attackTime(track.attack, index);
+    const configuredAttack = drum ? drumAttackTime(track.attack) : attackTime(track.attack, index);
     const attack = pad && gate !== null ? Math.min(configuredAttack, gate * .72) : configuredAttack;
-    const hold = 0;
-    const release = drum ? .012 : releaseTime(track.release, index);
+    const hold = drum ? holdTime(track.sustain) : 0;
+    const release = drum ? drumReleaseTime(track.release) : releaseTime(track.release, index);
     const decay = drum ? drumDecayTime(track.decay, index, track.patch) : .025 + track.decay ** 2 * 2.4;
     const sustain = Math.max(.00012, (drum ? .00012 : peak * track.sustain));
     amp.gain.setValueAtTime(.0001, time);
@@ -1562,11 +1564,10 @@ const pages = [
   ['rate', 'depth', 'cutoff'], ['attack', 'sustain', 'release'], ['pitch', 'duration', 'patch']
 ];
 function trackControls(index) {
-  if (index < 4 && [1, 2, 3].includes(page)) return ['tuning', 'decay', 'character'];
+  if (index < 4 && page === 1) return ['tuning', 'decay', 'character'];
   if (index < 4 && page === 4) return ['pitch', 'velocity', 'patch'];
   return pages[page];
 }
-const availablePages = () => selected < 4 ? [0, 1, 4] : [0, 1, 2, 3, 4];
 const labels = { cutoff: 'Cutoff', delay: 'Delay', reverb: 'Reverb', resonance: 'Resonance',
   decay: 'Decay', character: 'Drive', rate: 'LFO rate', depth: 'LFO depth', attack: 'Attack', sustain: 'Sustain', release: 'Release', tuning: 'Tuning', velocity: 'Velocity', pitch: 'Pitch', duration: 'Length', patch: 'Sound' };
 function parameterLabel(name, index) {
@@ -2440,7 +2441,6 @@ function setParam(index, name, value) {
 function selectTrack(index) {
   releaseAll();
   selected = index;
-  if (!availablePages().includes(page)) page = 1;
   renderMixer();
   revealChannel(index);
   const first = state.tracks[index].steps.slice(0, state.tracks[index].length * 16).findIndex(Boolean);
@@ -2450,10 +2450,7 @@ function selectTrack(index) {
   renderPattern();
 }
 function setPage(value) {
-  const allowed = availablePages();
-  const direction = value < page ? -1 : 1;
   page = (value + pages.length) % pages.length;
-  while (!allowed.includes(page)) page = (page + direction + pages.length) % pages.length;
   renderMixer();
   renderSteps();
 }
@@ -2573,9 +2570,9 @@ function dialValue(input, index, name) {
   let display = Math.round(value * 100) + '%';
   if (name === 'cutoff') display = value === 0 ? 'Off' : (value < 0 ? 'Low-pass ' : 'High-pass ') + Math.round(filterFrequency(value, index)) + ' Hz';
   if (name === 'rate') display = lfoRate(value, state.tempo).toFixed(2) + ' Hz';
-  if (name === 'attack') display = Math.round(1000 * attackTime(value, index)) + ' ms';
+  if (name === 'attack') display = Math.round(1000 * (index < 4 ? drumAttackTime(value) : attackTime(value, index))) + ' ms';
   if (name === 'sustain' && index < 4) display = Math.round(1000 * holdTime(value)) + ' ms';
-  if (name === 'release') display = releaseTime(value, index).toFixed(2) + ' s';
+  if (name === 'release') display = (index < 4 ? drumReleaseTime(value) : releaseTime(value, index)).toFixed(2) + ' s';
   if (name === 'tuning') display = (Math.round((value - .5) * 24) >= 0 ? '+' : '') + Math.round((value - .5) * 24) + ' st';
   if (name === 'decay' && index < 4) display = Math.round(drumDecayTime(value, index) * 1000) + ' ms';
   if (name === 'pitch') display = index === 7 && state.tracks[7].sampleId
@@ -2592,7 +2589,6 @@ function dialValue(input, index, name) {
 }
 function renderMixer() {
   for (const element of $('pages').children) {
-    element.hidden = !availablePages().includes(+element.dataset.page);
     pressed(element, +element.dataset.page === page);
   }
   $('mixer').replaceChildren(...state.tracks.map((track, index) => {
