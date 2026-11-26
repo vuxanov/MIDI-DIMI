@@ -1578,7 +1578,7 @@ function trackControls(index) {
   if (index < 4 && page === 4) return ['pitch', 'velocity', 'patch'];
   return pages[page];
 }
-const pageAvailable = candidate => selected >= 4 || (candidate !== 1 && candidate !== 2);
+const pageAvailable = candidate => candidate !== 2 || selected >= 4;
 const labels = { cutoff: 'Cutoff', delay: 'Delay', reverb: 'Reverb', resonance: 'Resonance',
   decay: 'Decay', character: 'Drive', rate: 'LFO rate', depth: 'LFO depth', attack: 'Attack', sustain: 'Sustain', release: 'Release', tuning: 'Tuning', velocity: 'Velocity', pitch: 'Pitch', duration: 'Length', patch: 'Sound' };
 function parameterLabel(name, index) {
