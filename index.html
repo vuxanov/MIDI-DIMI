@@ -1261,6 +1261,11 @@ function setupMIDI(actions) {
       feedback();
       return;
     }
+    if (dawLEDs && status === 182 && number === 30) {
+      sent.clear();
+      feedback();
+      return;
+    }
     if (dawLEDs && status === 190 && number >= 5 && number <= 36) {
       if (value) actions.touch(number < 13 ? -1 : Math.floor((number - 13) / 8), number < 13 ? number - 5 : (number - 13) % 8);
       return;
@@ -1352,15 +1357,18 @@ function setupMIDI(actions) {
     const portName = name => (name || '').replace(/\b(?:midi|input|output|in|out)\b/gi, '').replace(/[^a-z0-9]/gi, '').toLowerCase();
     const name = portName(input.name);
     const compatible = outputs.filter(candidate => !/hui/i.test(candidate.name || ''));
+    const dawOutputs = compatible.filter(candidate => /launch control|lcxl/i.test(candidate.name || '') && /daw/i.test(candidate.name || ''));
     const matchingModel = compatible.filter(candidate =>
       /launch control|lcxl/i.test(candidate.name || '') && /daw/i.test(candidate.name || '') === /daw/i.test(input.name || ''));
     const connectedOutput = (selectedOutput && outputs.find(candidate => candidate.id === selectedOutput))
+      || (modern && dawOutputs.length === 1 && dawOutputs[0])
       || (name && compatible.find(candidate => portName(candidate.name) === name))
       || (matchingModel.length === 1 && matchingModel[0])
       || (compatible.length === 1 && compatible[0])
       || undefined;
     const enableDAW = Boolean(modern && connectedOutput && (
-      /daw/i.test(input.name || '') || /daw/i.test(connectedOutput.name || '') || selectedOutput
+      /daw/i.test(connectedOutput.name || '') ||
+      (!/launch control|lcxl/i.test(connectedOutput.name || '') && (/daw/i.test(input.name || '') || selectedOutput))
     ));
     if (input === active && connectedOutput === output && enableDAW === dawLEDs) return;
     detach();
@@ -1401,7 +1409,9 @@ function setupMIDI(actions) {
     ledTest.disabled = !output || (modern && !dawLEDs);
     feedback();
     button.textContent = 'Disconnect MIDI';
-    actions.status(output ? '' : 'Choose an LED output under Controller mapping.');
+    if (!output) actions.status('Choose the Launch Control port under Controller mapping → LED output.');
+    else if (modern && !dawLEDs) actions.status('Choose the Launch Control XL 3 DAW port under LED output.');
+    else actions.status('');
   }
 
   button.onclick = async () => {
@@ -1454,7 +1464,7 @@ function setupMIDI(actions) {
     const testOutput = output;
     try {
       if (dawLEDs) {
-        for (const id of interval(37, 16)) testOutput.send([176, id, 21]);
+        for (const id of interval(13, 40)) testOutput.send([176, id, 21]);
       } else {
         testOutput.send([176 + legacyChannel, 0, 126]);
       }
