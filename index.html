@@ -1578,6 +1578,7 @@ function trackControls(index) {
   if (index < 4 && page === 4) return ['pitch', 'velocity', 'patch'];
   return pages[page];
 }
+const pageAvailable = candidate => selected >= 4 || (candidate !== 1 && candidate !== 2);
 const labels = { cutoff: 'Cutoff', delay: 'Delay', reverb: 'Reverb', resonance: 'Resonance',
   decay: 'Decay', character: 'Drive', rate: 'LFO rate', depth: 'LFO depth', attack: 'Attack', sustain: 'Sustain', release: 'Release', tuning: 'Tuning', velocity: 'Velocity', pitch: 'Pitch', duration: 'Length', patch: 'Sound' };
 function parameterLabel(name, index) {
@@ -2451,6 +2452,7 @@ function setParam(index, name, value) {
 function selectTrack(index) {
   releaseAll();
   selected = index;
+  if (!pageAvailable(page)) page = 0;
   renderMixer();
   revealChannel(index);
   const first = state.tracks[index].steps.slice(0, state.tracks[index].length * 16).findIndex(Boolean);
@@ -2460,7 +2462,9 @@ function selectTrack(index) {
   renderPattern();
 }
 function setPage(value) {
+  const direction = value < page ? -1 : 1;
   page = (value + pages.length) % pages.length;
+  while (!pageAvailable(page)) page = (page + direction + pages.length) % pages.length;
   renderMixer();
   renderSteps();
 }
@@ -2599,6 +2603,7 @@ function dialValue(input, index, name) {
 }
 function renderMixer() {
   for (const element of $('pages').children) {
+    element.hidden = !pageAvailable(+element.dataset.page);
     pressed(element, +element.dataset.page === page);
   }
   $('mixer').replaceChildren(...state.tracks.map((track, index) => {
