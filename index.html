@@ -2588,7 +2588,7 @@ function dialValue(input, index, name) {
   if (name === 'sustain' && index < 4) display = Math.round(1000 * holdTime(value)) + ' ms';
   if (name === 'release') display = (index < 4 ? drumReleaseTime(value) : releaseTime(value, index)).toFixed(2) + ' s';
   if (name === 'tuning') display = (Math.round((value - .5) * 24) >= 0 ? '+' : '') + Math.round((value - .5) * 24) + ' st';
-  if (name === 'decay' && index < 4) display = Math.round(drumDecayTime(value, index) * 1000) + ' ms';
+  if (name === 'decay' && index < 4) display = Math.round(drumDecayTime(value, index, state.tracks[index].patch) * 1000) + ' ms';
   if (name === 'pitch') display = index === 7 && state.tracks[7].sampleId
     ? ((state.tracks[7].sampleTranspose ?? 0) > 0 ? '+' : '') + (state.tracks[7].sampleTranspose ?? 0) + ' st'
     : noteName(noteStep(index)?.notes[0] ?? state.tracks[index].notePitch ?? roots[index]);
