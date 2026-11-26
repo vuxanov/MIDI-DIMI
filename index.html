@@ -313,7 +313,7 @@ details p {max-width:78ch}
 <dialog id="deleteDialog" aria-labelledby="deleteTitle" aria-describedby="deleteDescription">
 <form method="dialog">
 <p id="deleteTitle">Delete everything?</p>
-<p id="deleteDescription">All notes and hits on every track will be deleted. Use Cmd/Ctrl+Z to undo.</p>
+<p id="deleteDescription">This clears all notes and hits and resets effects on every track. Use Cmd/Ctrl+Z to undo.</p>
 <div class="dialog-actions">
 <button value="cancel" autofocus>Cancel</button>
 <button id="confirmDelete" value="delete" class="primary">Delete everything</button>
@@ -2952,6 +2952,7 @@ $('confirmDelete').onclick = () => {
   $('optionsMenu').open = false;
   chosen = 0;
   bank = 0;
+  resetAllEffects();
   renderPattern();
   save();
 };
@@ -2972,12 +2973,15 @@ $('resetActiveFX').onclick = () => {
   renderPattern();
   save();
 };
-$('resetFX').onclick = () => {
-  $('optionsMenu').open = false;
+function resetAllEffects() {
   state.tracks.forEach(track => Object.assign(track, defaultEffects));
   audio?.resetEffects();
   updateAudio();
   renderMixer();
+}
+$('resetFX').onclick = () => {
+  $('optionsMenu').open = false;
+  resetAllEffects();
   save();
 };
 $('length').onchange = () => {
